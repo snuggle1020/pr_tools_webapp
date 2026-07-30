@@ -71,7 +71,8 @@ def search_all(query: str, max_results: int = 300, sort: str = "date"):
 def collect_coverage(query: str, distribution_date: str, window_days: int = 3):
     """
     보도자료 배포일(distribution_date, 'YYYY-MM-DD') 기준으로
-    전후 window_days일 이내에 게재된 관련 기사만 걸러서 반환.
+    배포일 당일부터 이후 window_days일 이내에 게재된 관련 기사만 걸러서 반환
+    (배포일 이전 기사는 제외).
 
     반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버"}, ...]
     URL 기준 중복 제거, 게재일자 오름차순 정렬.
@@ -88,7 +89,7 @@ def collect_coverage(query: str, distribution_date: str, window_days: int = 3):
             continue
 
         delta_days = (pub_dt.date() - dist_dt.date()).days
-        if abs(delta_days) > window_days:
+        if delta_days < 0 or delta_days > window_days:
             continue
 
         url = item.get("originallink") or item.get("link")

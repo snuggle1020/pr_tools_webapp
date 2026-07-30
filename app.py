@@ -51,14 +51,14 @@ tab1, tab2 = st.tabs(["📄 결과보고서 (보도자료 1건)", "📅 월간 P
 # 탭 1: 결과보고서
 # ------------------------------------------------------------------
 with tab1:
-    st.caption("보도자료 1건을 배포한 뒤, 배포일 전후 기사를 모아 결과보고서 시트를 만듭니다.")
+    st.caption("보도자료 1건을 배포한 뒤, 배포일 이후 기사를 모아 결과보고서 시트를 만듭니다.")
 
     with st.form("report_form"):
         title = st.text_input("보도자료 제목", placeholder="예: 딥파인, 국방·산업 현장용 스마트글래스 기반 AI 에이전트 개발 나선다")
         company = st.text_input("기업명", placeholder="예: 딥파인")
         keyword = st.text_input("네이버 뉴스 검색 키워드", placeholder="예: 딥파인 스마트글래스 AI 에이전트")
         distribution_date = st.date_input("배포일", value=date.today())
-        window_days = st.number_input("배포일 전후 며칠까지 검색할지", min_value=0, max_value=30, value=3)
+        window_days = st.number_input("배포일 이후 며칠까지 검색할지 (배포일 이전 기사는 제외)", min_value=0, max_value=30, value=3)
         existing_file = st.file_uploader(
             "기존 결과보고서 워크북 (있으면 새 시트를 맨 왼쪽에 추가 / 없으면 새 파일 생성)",
             type=["xlsx"],
@@ -88,7 +88,8 @@ with tab1:
                     wb = openpyxl.Workbook()
                     wb.remove(wb.active)
 
-                unmapped = build_sheet(wb, sheet_name, title, company, dist_str, coverage)
+                with st.spinner("고정 목록에 없는 매체는 기사 페이지에서 매체명 자동 인식 중..."):
+                    unmapped, auto_detected = build_sheet(wb, sheet_name, title, company, dist_str, coverage)
                 wb.active = 0  # 새로 추가된(맨 왼쪽) 시트가 열리도록
 
                 buf = io.BytesIO()
@@ -99,10 +100,17 @@ with tab1:
                 filename = f"결과보고서_{title}_{request_date_str}.xlsx"
 
                 st.success(f"완료! 기사 {len(coverage)}건 수집됨 (시트: {sheet_name}).")
+                if auto_detected:
+                    lines = "\n".join(f"- {d} → {n}" for d, n in sorted(auto_detected.items()))
+                    st.info(
+                        "다음 매체는 고정 목록에 없어서 기사 페이지에서 자동으로 인식했습니다 "
+                        "(맞는지 확인해보고, domain_to_media.json에 추가해두면 다음부턴 더 빨라져요):\n"
+                        + lines
+                    )
                 if unmapped:
                     st.warning(
-                        "매체명을 자동으로 못 찾은 도메인: " + ", ".join(sorted(unmapped))
-                        + " — domain_to_media.json에 추가하면 다음부터 자동 인식됩니다."
+                        "매체명을 자동으로도 못 찾은 도메인: " + ", ".join(sorted(unmapped))
+                        + " — 직접 확인해서 domain_to_media.json에 추가해주세요."
                     )
                 st.download_button(
                     "⬇️ 엑셀 다운로드",
