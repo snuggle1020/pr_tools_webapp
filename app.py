@@ -17,6 +17,7 @@ import streamlit as st
 from naver_news import collect_coverage
 from report_sheet import build_sheet, derive_company, derive_keyword
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
+from daily_collect_sheet import build_daily_sheet
 
 REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
@@ -47,7 +48,7 @@ if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
         "로컬 실행 시 `.streamlit/secrets.toml`에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 등록하세요."
     )
 
-tab1, tab2 = st.tabs(["📄 결과보고서 (보도자료 1건)", "📅 월간 PR리포트"])
+tab1, tab2, tab3 = st.tabs(["📄 결과보고서 (보도자료 1건)", "📅 월간 PR리포트", "🔎 네이버 기사 수집"])
 
 # ------------------------------------------------------------------
 # 탭 1: 결과보고서
@@ -220,3 +221,72 @@ with tab2:
                         "1/2/4/5/6번 섹션은 지난달 데이터가 지워진 빈 템플릿 상태이니 직접 채워주세요. "
                         "다음 달 작업을 위해 이번에 만든 파일을 템플릿으로 보관해두세요."
                     )
+
+# ------------------------------------------------------------------
+# 탭 3: 네이버 기사 수집
+# ------------------------------------------------------------------
+with tab3:
+    st.caption("지정한 날짜에 게재된, 키워드가 포함된 네이버 기사를 모두 모아 엑셀로 만듭니다. 리포트 양식 없이 목록만 뽑습니다.")
+
+    with st.form("daily_form"):
+        target_date = st.date_input("날짜", value=date.today(), key="daily_date")
+        keywords_text = st.text_area(
+            "키워드 (여러 개면 줄바꿈으로 구분)",
+            placeholder="딥파인\n슈퍼브에이아이",
+            key="daily_keywords",
+        )
+        submitted3 = st.form_submit_button("기사 수집", type="primary")
+
+    if submitted3:
+        keywords = [k.strip() for k in keywords_text.splitlines() if k.strip()]
+        if not keywords:
+            st.error("키워드를 최소 1개 입력하세요.")
+        elif not NAVER_CLIENT_ID:
+            st.error("네이버 API 키가 없어 진행할 수 없습니다.")
+        else:
+            date_str = target_date.strftime("%Y-%m-%d")
+            keyword_coverage = []
+            with st.spinner(f"네이버에서 {len(keywords)}개 키워드 검색 중..."):
+                for kw in keywords:
+                    try:
+                        cov = collect_coverage(kw, date_str, window_days=0, require_text=kw)
+                    except Exception as e:
+                        st.error(f"'{kw}' 검색 실패: {e}")
+                        cov = []
+                    keyword_coverage.append((kw, cov))
+
+            total = sum(len(cov) for _, cov in keyword_coverage)
+            wb = openpyxl.Workbook()
+            wb.remove(wb.active)
+            sheet_name = target_date.strftime("%y%m%d")
+
+            with st.spinner("고정 목록에 없는 매체는 기사 페이지에서 매체명 자동 인식 중..."):
+                unmapped, auto_detected = build_daily_sheet(wb, sheet_name, keyword_coverage)
+
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+            filename = f"네이버기사수집_{date_str.replace('-', '')}.xlsx"
+
+            st.success(f"완료! 총 {total}건 수집됨.")
+            for kw, cov in keyword_coverage:
+                st.caption(f"- {kw}: {len(cov)}건")
+            if auto_detected:
+                lines = "\n".join(f"- {d} → {n}" for d, n in sorted(auto_detected.items()))
+                st.info(
+                    "다음 매체는 고정 목록에 없어서 기사 페이지에서 자동으로 인식했습니다 "
+                    "(맞는지 확인해보고, domain_to_media.json에 추가해두면 다음부턴 더 빨라져요):\n"
+                    + lines
+                )
+            if unmapped:
+                st.warning(
+                    "매체명을 자동으로도 못 찾은 도메인: " + ", ".join(sorted(unmapped))
+                    + " — 직접 확인해서 domain_to_media.json에 추가해주세요."
+                )
+            st.download_button(
+                "⬇️ 엑셀 다운로드",
+                data=buf,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="daily_download",
+            )
