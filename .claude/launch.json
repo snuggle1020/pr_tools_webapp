@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pr-tools-webapp",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-m", "streamlit", "run", "C:/Users/simeu/Desktop/클로드/pr_tools_webapp/app.py", "--server.headless", "true", "--server.port", "8501"],
+      "port": 8501
+    }
+  ]
+}
