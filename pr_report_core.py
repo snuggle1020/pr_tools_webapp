@@ -59,11 +59,31 @@ def _domain_of(url):
     return m.group(1) if m else ""
 
 
+def _decode_html(raw: bytes) -> str:
+    """국내 뉴스 사이트 중 EUC-KR/CP949 인코딩을 쓰는 곳이 있어서, UTF-8로 무작정
+    디코딩하면 매체명이 깨짐(예: boannews.com -> 'ȴ'). 페이지에 선언된 charset을
+    먼저 찾아보고, 없으면 흔한 인코딩들을 strict하게 시도해본 뒤 최후에만 ignore."""
+    head = raw[:2000].decode("latin-1", errors="ignore")
+    m = re.search(r'charset=["\']?\s*([\w-]+)', head, re.IGNORECASE)
+    candidates = []
+    if m:
+        enc = m.group(1).lower()
+        candidates.append({"euckr": "euc-kr", "ms949": "cp949"}.get(enc, enc))
+    candidates += ["utf-8", "cp949", "euc-kr"]
+    for enc in candidates:
+        try:
+            return raw.decode(enc, errors="strict")
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="ignore")
+
+
 def _fetch_site_name(url):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; ReportBot/1.0)"})
         with urllib.request.urlopen(req, timeout=5) as resp:
-            html = resp.read(200_000).decode("utf-8", errors="ignore")
+            raw = resp.read(200_000)
+        html = _decode_html(raw)
         m = re.search(r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
         if not m:
             m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:site_name["\']', html, re.IGNORECASE)

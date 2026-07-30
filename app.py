@@ -15,8 +15,10 @@ import openpyxl
 import streamlit as st
 
 from naver_news import collect_coverage
-from report_sheet import build_sheet
+from report_sheet import build_sheet, derive_company, derive_keyword
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
+
+REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
 st.set_page_config(page_title="PR 리포트 도구", page_icon="📰", layout="wide")
 
@@ -51,14 +53,14 @@ tab1, tab2 = st.tabs(["📄 결과보고서 (보도자료 1건)", "📅 월간 P
 # 탭 1: 결과보고서
 # ------------------------------------------------------------------
 with tab1:
-    st.caption("보도자료 1건을 배포한 뒤, 배포일 이후 기사를 모아 결과보고서 시트를 만듭니다.")
+    st.caption(
+        "보도자료 제목만 넣으면 기업명/검색어는 자동으로 뽑아냅니다. "
+        f"배포일 당일부터 {REPORT_WINDOW_DAYS}일 뒤까지 게재된 기사만 모읍니다."
+    )
 
     with st.form("report_form"):
         title = st.text_input("보도자료 제목", placeholder="예: 딥파인, 국방·산업 현장용 스마트글래스 기반 AI 에이전트 개발 나선다")
-        company = st.text_input("기업명", placeholder="예: 딥파인")
-        keyword = st.text_input("네이버 뉴스 검색 키워드", placeholder="예: 딥파인 스마트글래스 AI 에이전트")
         distribution_date = st.date_input("배포일", value=date.today())
-        window_days = st.number_input("배포일 이후 며칠까지 검색할지 (배포일 이전 기사는 제외)", min_value=0, max_value=30, value=3)
         existing_file = st.file_uploader(
             "기존 결과보고서 워크북 (있으면 새 시트를 맨 왼쪽에 추가 / 없으면 새 파일 생성)",
             type=["xlsx"],
@@ -67,15 +69,21 @@ with tab1:
         submitted = st.form_submit_button("리포트 생성", type="primary")
 
     if submitted:
-        if not title or not company or not keyword:
-            st.error("제목 / 기업명 / 검색 키워드를 모두 입력하세요.")
+        if not title:
+            st.error("보도자료 제목을 입력하세요.")
         elif not NAVER_CLIENT_ID:
             st.error("네이버 API 키가 없어 진행할 수 없습니다.")
         else:
+            company = derive_company(title)
+            keyword = derive_keyword(title)
+            st.caption(f"자동 인식: 기업명 **{company}** / 검색어 **{keyword}**")
+
             dist_str = distribution_date.strftime("%Y-%m-%d")
             with st.spinner(f"네이버에서 '{keyword}' 검색 중..."):
                 try:
-                    coverage = collect_coverage(keyword, dist_str, window_days=int(window_days))
+                    coverage = collect_coverage(
+                        keyword, dist_str, window_days=REPORT_WINDOW_DAYS, require_text=company
+                    )
                 except Exception as e:
                     st.error(f"뉴스 수집 실패: {e}")
                     coverage = None

@@ -7,6 +7,7 @@
 og:site_name 메타태그를 직접 읽어서 자동 인식 -> 그래도 실패하면 [확인필요:도메인].
 """
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime
@@ -35,6 +36,22 @@ def load_domain_map():
 
 def domain_of(url: str) -> str:
     return urlparse(url).netloc.replace("www.", "")
+
+
+def derive_company(title: str) -> str:
+    """보도자료 제목은 관례적으로 '{기업명}, ...' 형식이라 쉼표 앞부분을 기업명으로 사용."""
+    for comma in [",", "，"]:
+        if comma in title:
+            return title.split(comma, 1)[0].strip()
+    return title.strip()
+
+
+def derive_keyword(title: str) -> str:
+    """네이버 뉴스 검색어. 실측 결과 제목 전체를 검색어로 쓰면 단어가 많아져
+    오히려 검색 결과가 급감함(12건 -> 3건). 기업명 하나만 검색어로 쓰는 쪽이
+    재현율이 훨씬 높고, 관련성 없는 기사는 collect_coverage의 require_text=기업명
+    필터가 걸러줌."""
+    return derive_company(title)
 
 
 def resolve_media_name(url: str, domain_map: dict):
