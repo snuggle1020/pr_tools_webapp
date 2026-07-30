@@ -37,6 +37,8 @@ MEDIA_MAP = {
     "etnews.com": "전자신문", "thebell.co.kr": "더벨", "fashionbiz.co.kr": "패션비즈",
     "apparelnews.co.kr": "어패럴뉴스",
     "platum.kr": "플래텀",
+    "bloter.net": "블로터",
+    "technoa.co.kr": "테크노아",
 }
 
 # Streamlit Cloud는 파일시스템이 매 실행마다 초기화될 수 있어서 디스크 캐시 대신
