@@ -39,6 +39,7 @@ MEDIA_MAP = {
     "platum.kr": "플래텀",
     "bloter.net": "블로터",
     "technoa.co.kr": "테크노아",
+    "digitalchosun.dizzo.com": "디지틀조선일보",
 }
 
 # Streamlit Cloud는 파일시스템이 매 실행마다 초기화될 수 있어서 디스크 캐시 대신

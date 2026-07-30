@@ -10,6 +10,7 @@ import os
 import re
 import html
 import time
+import urllib.request
 from datetime import datetime
 
 import requests
@@ -35,6 +36,62 @@ def _strip_tags(text: str) -> str:
 def _parse_pubdate(pubdate_str: str) -> datetime:
     # 예: 'Thu, 16 Jul 2026 10:04:00 +0900'
     return datetime.strptime(pubdate_str, "%a, %d %b %Y %H:%M:%S %z")
+
+
+def _contains_word(text: str, term: str) -> bool:
+    """단순 부분일치(in)는 '에티버스이피에이'처럼 회사명을 포함한 다른 계열사/브랜드
+    이름까지 걸려서 무관한 보도자료가 섞여 들어옴. 독립된 단어로 등장할 때만 인정."""
+    return re.search(r"\b" + re.escape(term) + r"\b", text) is not None
+
+
+def _fetch_article_text(url, timeout=8):
+    """기사 페이지를 받아서 태그를 제거한 순수 텍스트로 변환 (best-effort)"""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; ReportBot/1.0)"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_html = resp.read(500_000).decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+    raw_html = re.sub(r"<script.*?</script>", " ", raw_html, flags=re.DOTALL | re.IGNORECASE)
+    raw_html = re.sub(r"<style.*?</style>", " ", raw_html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", raw_html)
+    text = re.sub(r"&nbsp;|&quot;|&amp;|&lt;|&gt;|&apos;", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _looks_like_press_release_mention(snippet: str, company: str) -> bool:
+    """회사가 문장의 주어로 등장하며 '~라고 (며칠) 밝혔다/말했다/전했다' 같은
+    보도자료 특유의 문장 패턴이 있는지 확인 (딥파인 PR리포트의 classify_articles.py와 동일 로직)."""
+    kw = re.escape(company)
+    patterns = [
+        rf"{kw}\s*(은|는|이|가)\s*[^.]{{0,150}}(라고|다고)\s*\d{{0,2}}일?\s*(밝혔다|말했다|전했다)",
+        rf"{kw}\s*[가-힣]{{0,10}}\s*(대표|CTO|CEO|본부장)[^.]{{0,20}}(는|은)?[^.]{{0,80}}(말했다|밝혔다|전했다)",
+    ]
+    return any(re.search(p, snippet) for p in patterns)
+
+
+def _relevance_status(title: str, url: str, company: str, description: str) -> str:
+    """require_text 정밀 검증. 'excluded' / 'ambiguous' / 'confirmed' 중 하나를 반환.
+
+    - 제목이 회사명으로 시작 -> 'confirmed' (관례상 확정 보도자료, 네트워크 요청 없이 빠름)
+    - 회사명이 제목/요약 어디에도 독립된 단어로 없음 -> 'excluded' (확실히 무관, 안전하게 제외)
+    - 그 외(본문/요약에 언급은 있지만 제목이 회사명으로 시작하진 않음) -> 기사 본문을 열어
+      보도자료 특유의 문장 패턴("~라고 밝혔다" 등)이 있으면 'confirmed', 없으면 'ambiguous'.
+
+    'ambiguous'는 실제로 관련 있는 기사인데 문장 패턴이 다르게 쓰인 경우(예: "체결했다")도
+    있을 수 있어서, 제외하지 않고 결과에는 포함하되 표시만 해서 사람이 확인하게 한다
+    (여기서 확신 없다고 제외하면 진짜 기사를 놓칠 위험이 있음)."""
+    if title.strip().startswith(company):
+        return "confirmed"
+    if not _contains_word(title, company) and not _contains_word(description, company):
+        return "excluded"
+    text = _fetch_article_text(url)
+    if text and _contains_word(text, company):
+        idx = text.find(company)
+        snippet = text[max(0, idx - 50): idx + 700]
+        if _looks_like_press_release_mention(snippet, company):
+            return "confirmed"
+    return "ambiguous"
 
 
 def search_news(query: str, display: int = 100, start: int = 1, sort: str = "date"):
@@ -74,9 +131,14 @@ def collect_coverage(query: str, distribution_date: str, window_days: int = 3, r
     배포일 당일부터 이후 window_days일 이내에 게재된 관련 기사만 걸러서 반환
     (배포일 이전 기사는 제외).
 
-    require_text: 지정하면 제목/요약 어디에도 이 문자열(보통 기업명)이 없는 기사는 제외.
-    네이버 검색은 키워드 일부 단어만 일치해도 결과에 포함시키는 경우가 있어서,
-    실제로 무관한 기사가 섞이는 걸 막기 위한 최소한의 필터.
+    require_text: 지정하면(보통 기업명) 실제로 그 기업에 관한 기사인지 검증한다.
+    - 회사명이 제목/요약 어디에도 독립된 단어로 없으면 확실히 무관하다고 보고 제외
+      (기업명을 포함한 다른 계열사/브랜드명, 예: "에티버스이피에이"의 무관한 보도자료가
+      섞이는 것도 이 단계에서 걸러짐).
+    - 제목이 기업명으로 시작하면 확정 보도자료로 보고 통과.
+    - 그 외 애매한 경우(본문에 언급은 있지만 "~라고 밝혔다" 같은 보도자료 문장
+      패턴을 못 찾은 경우)는 실제로 관련 기사인데 표현만 다를 수 있어서(예: "체결했다")
+      제외하지 않고 제목 앞에 "[확인필요] "를 붙여 결과에 포함한다 (사람이 확인하도록).
 
     반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버"}, ...]
     URL 기준 중복 제거, 게재일자 오름차순 정렬.
@@ -102,8 +164,12 @@ def collect_coverage(query: str, distribution_date: str, window_days: int = 3, r
 
         title = _strip_tags(item.get("title", ""))
         description = _strip_tags(item.get("description", ""))
-        if require_text and require_text not in title and require_text not in description:
-            continue
+        if require_text:
+            status = _relevance_status(title, url, require_text, description)
+            if status == "excluded":
+                continue
+            if status == "ambiguous":
+                title = f"[확인필요] {title}"
 
         seen_urls.add(url)
 

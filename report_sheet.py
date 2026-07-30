@@ -128,9 +128,9 @@ def build_sheet(wb, sheet_name, title, company, distribution_date, coverage):
             auto_detected[domain] = media_name
         enriched.append((media_name, item))
 
-    # 날짜 우선 정렬, 날짜가 같으면 매체 우선순위로 정렬
+    # 매체 우선순위로 정렬(통신사>일간지>경제지>IT전문지>산업지>온라인매체), 같은 매체면 날짜순
     enriched.sort(
-        key=lambda pair: (pair[1]["게재일자"].date(), media_sort_key(pair[0]), pair[1]["게재일자"])
+        key=lambda pair: (media_sort_key(pair[0]), pair[1]["게재일자"])
     )
 
     for i, (media_name, item) in enumerate(enriched):
