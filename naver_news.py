@@ -144,20 +144,30 @@ def search_all(query: str, max_results: int = 300, sort: str = "date"):
     return results
 
 
-def collect_coverage(query: str, distribution_date: str, window_days: int = 3, require_text: str = None):
+def collect_coverage(
+    query: str,
+    distribution_date: str,
+    window_days: int = 3,
+    require_text: str = None,
+    verify_relevance: bool = True,
+):
     """
     보도자료 배포일(distribution_date, 'YYYY-MM-DD') 기준으로
     배포일 당일부터 이후 window_days일 이내에 게재된 관련 기사만 걸러서 반환
     (배포일 이전 기사는 제외).
 
-    require_text: 지정하면(보통 기업명) 실제로 그 기업에 관한 기사인지 검증한다.
-    - 회사명이 제목/요약 어디에도 독립된 단어로 없으면 확실히 무관하다고 보고 제외
-      (기업명을 포함한 다른 계열사/브랜드명, 예: "에티버스이피에이"의 무관한 보도자료가
-      섞이는 것도 이 단계에서 걸러짐).
-    - 제목이 기업명으로 시작하면 확정 보도자료로 보고 통과.
-    - 그 외 애매한 경우(본문에 언급은 있지만 "~라고 밝혔다" 같은 보도자료 문장
-      패턴을 못 찾은 경우)는 실제로 관련 기사인데 표현만 다를 수 있어서(예: "체결했다")
-      제외하지 않고 제목 앞에 "[확인필요] "를 붙여 결과에 포함한다 (사람이 확인하도록).
+    require_text: 지정하면(보통 기업명) 제목/요약 어디에도 독립된 단어로 없는 기사는
+    제외한다 (기업명을 포함한 다른 계열사/브랜드명, 예: "에티버스이피에이"의 무관한
+    기사가 섞이는 것을 막음).
+
+    verify_relevance: True(기본값)면 한 단계 더 나아가 "진짜 이 기업에 관한 보도자료가
+    맞는지"까지 검증한다 - 제목이 기업명으로 시작하면 확정 통과, 애매하면(본문에
+    언급은 있지만 "~라고 밝혔다" 같은 보도자료 문장 패턴을 못 찾은 경우) 실제로 관련
+    기사인데 표현만 다를 수 있어서(예: "체결했다") 제외하지 않고 제목 앞에
+    "[확인필요] "를 붙여 포함한다. 이건 "이 특정 보도자료의 커버리지만 뽑고 싶다"는
+    결과보고서/PR리포트용 정밀 검증이라 느리다(기사 본문을 열어봄).
+    False면 require_text가 단어로 등장하기만 하면 다 포함한다(빠름, 본문 조회 없음)
+    - "이 키워드 걸린 기사를 그냥 다 모아줘"라는 네이버 기사 수집 탭에 맞는 동작.
 
     반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버"}, ...]
     URL 기준 중복 제거, 게재일자 오름차순 정렬.
@@ -183,7 +193,10 @@ def collect_coverage(query: str, distribution_date: str, window_days: int = 3, r
 
         title = _strip_tags(item.get("title", ""))
         description = _strip_tags(item.get("description", ""))
-        if require_text:
+        if require_text and not verify_relevance:
+            if not _contains_word(title, require_text) and not _contains_word(description, require_text):
+                continue
+        elif require_text:
             status = _relevance_status(title, url, require_text, description)
             if status == "excluded":
                 continue

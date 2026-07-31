@@ -262,7 +262,9 @@ with tab3:
             with st.spinner(f"네이버에서 {len(keywords)}개 키워드 검색 중..."):
                 for kw in keywords:
                     try:
-                        cov = collect_coverage(kw, start_str, window_days=window_days, require_text=kw)
+                        cov = collect_coverage(
+                            kw, start_str, window_days=window_days, require_text=kw, verify_relevance=False
+                        )
                     except Exception as e:
                         st.error(f"'{kw}' 검색 실패: {e}")
                         cov = []
