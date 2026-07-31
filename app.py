@@ -235,8 +235,8 @@ with tab3:
             key="daily_date_range",
         )
         keywords_text = st.text_area(
-            "키워드 (여러 개면 줄바꿈으로 구분)",
-            placeholder="예)딥파인\n엠아이큐브솔루션",
+            "키워드 (한 단어로 입력)",
+            placeholder="예)딥파인",
             key="daily_keywords",
         )
         submitted3 = st.form_submit_button("기사 수집", type="primary")
