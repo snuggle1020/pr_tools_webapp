@@ -70,13 +70,33 @@ def _looks_like_press_release_mention(snippet: str, company: str) -> bool:
     return any(re.search(p, snippet) for p in patterns)
 
 
+def _extract_snippets(text: str, term: str, window: int = 700, max_occurrences: int = 6):
+    """term이 등장하는 모든 위치 주변 텍스트를 잘라내기. 첫 등장 위치가 메뉴/내비게이션이고
+    실제 문장은 더 뒤에 있는 경우가 있어서(예: 언론사 사이트 상단 메뉴에 제목이 반복 노출),
+    첫 등장 위치 하나만 보지 않고 여러 등장 위치를 순서대로 반환한다
+    (classify_articles.py의 extract_relevant_paragraphs와 동일 로직)."""
+    snippets = []
+    start_search = 0
+    for _ in range(max_occurrences):
+        idx = text.find(term, start_search)
+        if idx == -1:
+            break
+        start = max(0, idx - 50)
+        end = min(len(text), idx + window)
+        snippets.append(text[start:end])
+        start_search = idx + len(term)
+    return snippets
+
+
 def _relevance_status(title: str, url: str, company: str, description: str) -> str:
     """require_text 정밀 검증. 'excluded' / 'ambiguous' / 'confirmed' 중 하나를 반환.
 
     - 제목이 회사명으로 시작 -> 'confirmed' (관례상 확정 보도자료, 네트워크 요청 없이 빠름)
     - 회사명이 제목/요약 어디에도 독립된 단어로 없음 -> 'excluded' (확실히 무관, 안전하게 제외)
     - 그 외(본문/요약에 언급은 있지만 제목이 회사명으로 시작하진 않음) -> 기사 본문을 열어
-      보도자료 특유의 문장 패턴("~라고 밝혔다" 등)이 있으면 'confirmed', 없으면 'ambiguous'.
+      회사명이 등장하는 위치마다(메뉴 등 첫 등장 위치만 보면 놓칠 수 있어서) 보도자료
+      특유의 문장 패턴("~라고 밝혔다" 등)이 있는지 확인. 하나라도 있으면 'confirmed',
+      없으면 'ambiguous'.
 
     'ambiguous'는 실제로 관련 있는 기사인데 문장 패턴이 다르게 쓰인 경우(예: "체결했다")도
     있을 수 있어서, 제외하지 않고 결과에는 포함하되 표시만 해서 사람이 확인하게 한다
@@ -86,11 +106,10 @@ def _relevance_status(title: str, url: str, company: str, description: str) -> s
     if not _contains_word(title, company) and not _contains_word(description, company):
         return "excluded"
     text = _fetch_article_text(url)
-    if text and _contains_word(text, company):
-        idx = text.find(company)
-        snippet = text[max(0, idx - 50): idx + 700]
-        if _looks_like_press_release_mention(snippet, company):
-            return "confirmed"
+    if text:
+        for snippet in _extract_snippets(text, company):
+            if _looks_like_press_release_mention(snippet, company):
+                return "confirmed"
     return "ambiguous"
 
 
