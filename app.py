@@ -21,7 +21,7 @@ from daily_collect_sheet import build_daily_sheet
 
 REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
-st.set_page_config(page_title="PR 리포트 도구", page_icon="📰", layout="wide")
+st.set_page_config(page_title="오픈피알_PR 보고서", page_icon="📰", layout="wide")
 
 
 def _load_naver_credentials():
@@ -40,7 +40,7 @@ def _load_naver_credentials():
 
 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET = _load_naver_credentials()
 
-st.title("📰 PR 리포트 도구")
+st.title("📰 PR 보고서 생성기")
 
 if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
     st.error(
@@ -48,7 +48,7 @@ if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
         "로컬 실행 시 `.streamlit/secrets.toml`에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 등록하세요."
     )
 
-tab1, tab2, tab3 = st.tabs(["📄 결과보고서 (보도자료 1건)", "📅 월간 PR리포트", "🔎 네이버 기사 수집"])
+tab1, tab2, tab3 = st.tabs(["📄 보도자료 결과보고서", "📅 월간 PR리포트", "🔎 네이버 기사 수집"])
 
 # ------------------------------------------------------------------
 # 탭 1: 결과보고서
@@ -63,7 +63,7 @@ with tab1:
         title = st.text_input("보도자료 제목", placeholder="예: 딥파인, 국방·산업 현장용 스마트글래스 기반 AI 에이전트 개발 나선다")
         distribution_date = st.date_input("배포일", value=date.today())
         existing_file = st.file_uploader(
-            "기존 결과보고서 워크북 (있으면 새 시트를 맨 왼쪽에 추가 / 없으면 새 파일 생성)",
+            "기존 결과보고서 파일 (파일을 추가하면 맨 왼쪽에 새 시트를 추가합니다 / 없으면 새 파일을 생성합니다)",
             type=["xlsx"],
             key="report_existing_wb",
         )
@@ -132,10 +132,10 @@ with tab1:
 # 탭 2: 월간 PR리포트
 # ------------------------------------------------------------------
 with tab2:
-    st.caption("기존 워크북(지난달까지 있는 파일)에 새 달 시트를 추가하고, 기사형식(K열) 자동분류까지 실행합니다.")
+    st.caption("기존 파일에 새 달 시트를 추가하고, 기사형식이 보도자료인 것만 자동분류합니다.")
 
     template_file = st.file_uploader(
-        "기존 PR리포트 워크북 업로드 (지난달까지 있는 파일)", type=["xlsx"], key="pr_template"
+        "기존 PR리포트 파일 업로드", type=["xlsx"], key="pr_template"
     )
 
     sheet_options = []
@@ -160,7 +160,7 @@ with tab2:
     else:
         template_sheet_name = st.text_input("서식을 복제할 기존 월 시트 이름 (예: 6월)", key="pr_sheet_manual")
 
-    do_classify = st.checkbox("기사형식(K열) 자동 분류도 실행 (기사 수에 따라 다소 시간 걸림)", value=True, key="pr_classify")
+    do_classify = st.checkbox("기사형식 자동 분류도 실행", value=True, key="pr_classify")
 
     if st.button("PR리포트 생성", type="primary", key="pr_submit"):
         if template_file is None:
@@ -226,30 +226,43 @@ with tab2:
 # 탭 3: 네이버 기사 수집
 # ------------------------------------------------------------------
 with tab3:
-    st.caption("지정한 날짜에 게재된, 키워드가 포함된 네이버 기사를 모두 모아 엑셀로 만듭니다. 리포트 양식 없이 목록만 뽑습니다.")
+    st.caption("지정한 기간에 게재된, 키워드가 포함된 네이버 기사를 모두 모아 엑셀로 만듭니다. 리포트 양식 없이 목록만 뽑습니다.")
 
     with st.form("daily_form"):
-        target_date = st.date_input("날짜", value=date.today(), key="daily_date")
+        date_range = st.date_input(
+            "기간",
+            value=(date.today(), date.today()),
+            key="daily_date_range",
+        )
         keywords_text = st.text_area(
             "키워드 (여러 개면 줄바꿈으로 구분)",
-            placeholder="딥파인\n슈퍼브에이아이",
+            placeholder="예)딥파인\n엠아이큐브솔루션",
             key="daily_keywords",
         )
         submitted3 = st.form_submit_button("기사 수집", type="primary")
 
     if submitted3:
         keywords = [k.strip() for k in keywords_text.splitlines() if k.strip()]
+        if isinstance(date_range, (list, tuple)):
+            start_date = date_range[0]
+            end_date = date_range[1] if len(date_range) > 1 else date_range[0]
+        else:
+            start_date = end_date = date_range
+
         if not keywords:
             st.error("키워드를 최소 1개 입력하세요.")
+        elif start_date > end_date:
+            st.error("시작일이 종료일보다 늦을 수 없습니다.")
         elif not NAVER_CLIENT_ID:
             st.error("네이버 API 키가 없어 진행할 수 없습니다.")
         else:
-            date_str = target_date.strftime("%Y-%m-%d")
+            start_str = start_date.strftime("%Y-%m-%d")
+            window_days = (end_date - start_date).days
             keyword_coverage = []
             with st.spinner(f"네이버에서 {len(keywords)}개 키워드 검색 중..."):
                 for kw in keywords:
                     try:
-                        cov = collect_coverage(kw, date_str, window_days=0, require_text=kw)
+                        cov = collect_coverage(kw, start_str, window_days=window_days, require_text=kw)
                     except Exception as e:
                         st.error(f"'{kw}' 검색 실패: {e}")
                         cov = []
@@ -258,7 +271,12 @@ with tab3:
             total = sum(len(cov) for _, cov in keyword_coverage)
             wb = openpyxl.Workbook()
             wb.remove(wb.active)
-            sheet_name = target_date.strftime("%y%m%d")
+            if start_date == end_date:
+                sheet_name = start_date.strftime("%y%m%d")
+                date_str = start_date.strftime("%Y%m%d")
+            else:
+                sheet_name = f"{start_date.strftime('%y%m%d')}-{end_date.strftime('%y%m%d')}"
+                date_str = f"{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}"
 
             with st.spinner("고정 목록에 없는 매체는 기사 페이지에서 매체명 자동 인식 중..."):
                 unmapped, auto_detected = build_daily_sheet(wb, sheet_name, keyword_coverage)
@@ -266,7 +284,7 @@ with tab3:
             buf = io.BytesIO()
             wb.save(buf)
             buf.seek(0)
-            filename = f"네이버기사수집_{date_str.replace('-', '')}.xlsx"
+            filename = f"네이버기사수집_{date_str}.xlsx"
 
             st.success(f"완료! 총 {total}건 수집됨.")
             for kw, cov in keyword_coverage:
