@@ -38,10 +38,32 @@ def _parse_pubdate(pubdate_str: str) -> datetime:
     return datetime.strptime(pubdate_str, "%a, %d %b %Y %H:%M:%S %z")
 
 
+# 한국어는 명사 뒤에 조사가 띄어쓰기 없이 바로 붙는다("딥파인은", "딥파인이" 등).
+# 그래서 순수 \b(단어경계) 정규식은 조사 결합을 인식 못 해서 본문 속 진짜 언급을
+# 다 놓친다. 반대로 순수 부분일치(in)는 "에티버스이피에이"처럼 회사명을 포함한
+# 다른 브랜드명까지 걸린다. 그래서 "회사명 + (흔한 조사 하나, 있으면) + 그 다음은
+# 한글/영문/숫자가 이어지지 않음"을 하나의 패턴으로 검사한다.
+_KOREAN_PARTICLES = sorted(
+    [
+        "이라고", "라고", "이라는", "라는", "이란", "란",
+        "에서", "에게", "한테", "부터", "까지", "처럼", "보다", "께서", "으로", "이나",
+        "은", "는", "이", "가", "을", "를", "의", "와", "과", "도", "만", "에", "로", "나",
+    ],
+    key=len,
+    reverse=True,
+)
+_PARTICLE_PATTERN = "|".join(re.escape(p) for p in _KOREAN_PARTICLES)
+
+
+def _word_pattern(term: str):
+    return re.compile(rf"{re.escape(term)}(?:{_PARTICLE_PATTERN})?(?![가-힣A-Za-z0-9])")
+
+
 def _contains_word(text: str, term: str) -> bool:
     """단순 부분일치(in)는 '에티버스이피에이'처럼 회사명을 포함한 다른 계열사/브랜드
-    이름까지 걸려서 무관한 보도자료가 섞여 들어옴. 독립된 단어로 등장할 때만 인정."""
-    return re.search(r"\b" + re.escape(term) + r"\b", text) is not None
+    이름까지 걸려서 무관한 보도자료가 섞여 들어옴. 독립된 단어(조사 결합 포함)로
+    등장할 때만 인정."""
+    return _word_pattern(term).search(text) is not None
 
 
 def _fetch_article_text(url, timeout=8):
@@ -71,20 +93,20 @@ def _looks_like_press_release_mention(snippet: str, company: str) -> bool:
 
 
 def _extract_snippets(text: str, term: str, window: int = 700, max_occurrences: int = 6):
-    """term이 등장하는 모든 위치 주변 텍스트를 잘라내기. 첫 등장 위치가 메뉴/내비게이션이고
-    실제 문장은 더 뒤에 있는 경우가 있어서(예: 언론사 사이트 상단 메뉴에 제목이 반복 노출),
-    첫 등장 위치 하나만 보지 않고 여러 등장 위치를 순서대로 반환한다
-    (classify_articles.py의 extract_relevant_paragraphs와 동일 로직)."""
+    """term이 독립된 단어로 등장하는 모든 위치 주변 텍스트를 잘라내기 (단순 substring이
+    아니라 단어경계 기준 - "에티버스ePA"/"에티버스이피에이" 같은 다른 브랜드명 안에
+    끼어있는 경우는 무시). 첫 등장 위치가 메뉴/내비게이션이고 실제 문장은 더 뒤에 있는
+    경우가 있어서(예: 언론사 사이트 상단 메뉴에 제목이 반복 노출), 첫 등장 위치 하나만
+    보지 않고 여러 등장 위치를 순서대로 반환한다 (조사 결합도 인식하는 _word_pattern 사용
+    - classify_articles.py의 extract_relevant_paragraphs와 동일 로직 + 조사 인식 매칭)."""
+    pattern = _word_pattern(term)
     snippets = []
-    start_search = 0
-    for _ in range(max_occurrences):
-        idx = text.find(term, start_search)
-        if idx == -1:
+    for m in pattern.finditer(text):
+        if len(snippets) >= max_occurrences:
             break
-        start = max(0, idx - 50)
-        end = min(len(text), idx + window)
+        start = max(0, m.start() - 50)
+        end = min(len(text), m.start() + window)
         snippets.append(text[start:end])
-        start_search = idx + len(term)
     return snippets
 
 
@@ -92,24 +114,37 @@ def _relevance_status(title: str, url: str, company: str, description: str) -> s
     """require_text 정밀 검증. 'excluded' / 'ambiguous' / 'confirmed' 중 하나를 반환.
 
     - 제목이 회사명으로 시작 -> 'confirmed' (관례상 확정 보도자료, 네트워크 요청 없이 빠름)
-    - 회사명이 제목/요약 어디에도 독립된 단어로 없음 -> 'excluded' (확실히 무관, 안전하게 제외)
-    - 그 외(본문/요약에 언급은 있지만 제목이 회사명으로 시작하진 않음) -> 기사 본문을 열어
-      회사명이 등장하는 위치마다(메뉴 등 첫 등장 위치만 보면 놓칠 수 있어서) 보도자료
-      특유의 문장 패턴("~라고 밝혔다" 등)이 있는지 확인. 하나라도 있으면 'confirmed',
-      없으면 'ambiguous'.
+    - 그 외에는 기사 본문을 직접 열어서 확인한다. 네이버가 주는 짧은 요약(description)만
+      보고 "요약에 없으니 무관"으로 판단하면, [게시판]/[Tech & Now] 같은 여러 기업을
+      한꺼번에 다루는 다이제스트형 기사에서 실제로는 회사명이 본문에 나오는데 요약에는
+      빠져있어서 잘못 제외되는 문제가 있었다 (요약은 보통 첫 문단만 담고, 다이제스트
+      기사는 회사 언급이 뒤쪽 항목에 있는 경우가 많음). 그래서 본문 전체를 확인해서:
+        - 회사명이 본문에 독립된 단어로 아예 없으면 'excluded' (다른 계열사/브랜드명
+          예: "에티버스이피에이"의 무관한 기사가 섞이는 것도 여기서 걸러짐)
+        - 있으면, 등장하는 위치마다(첫 등장 위치만 보면 메뉴 등에 걸려 놓칠 수 있어서)
+          보도자료 특유의 문장 패턴("~라고 밝혔다" 등)이 있는지 확인해서 있으면 'confirmed'
+        - 언급은 있지만 그 패턴을 못 찾으면 'ambiguous'
 
     'ambiguous'는 실제로 관련 있는 기사인데 문장 패턴이 다르게 쓰인 경우(예: "체결했다")도
     있을 수 있어서, 제외하지 않고 결과에는 포함하되 표시만 해서 사람이 확인하게 한다
     (여기서 확신 없다고 제외하면 진짜 기사를 놓칠 위험이 있음)."""
     if title.strip().startswith(company):
         return "confirmed"
-    if not _contains_word(title, company) and not _contains_word(description, company):
-        return "excluded"
+
     text = _fetch_article_text(url)
-    if text:
-        for snippet in _extract_snippets(text, company):
-            if _looks_like_press_release_mention(snippet, company):
-                return "confirmed"
+    if text is None:
+        # 본문을 못 가져온 경우: 제목/요약에 단어로도 없으면 무관, 있으면 사람 확인
+        if _contains_word(title, company) or _contains_word(description, company):
+            return "ambiguous"
+        return "excluded"
+
+    snippets = _extract_snippets(text, company)
+    if not snippets:
+        return "excluded"  # 본문에도 독립된 단어로 전혀 없음 (다른 브랜드명 등) -> 확실히 무관
+
+    for snippet in snippets:
+        if _looks_like_press_release_mention(snippet, company):
+            return "confirmed"
     return "ambiguous"
 
 
