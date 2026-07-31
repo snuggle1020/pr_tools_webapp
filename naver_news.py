@@ -113,8 +113,12 @@ def _extract_snippets(text: str, term: str, window: int = 700, max_occurrences: 
 def _relevance_status(title: str, url: str, company: str, description: str) -> str:
     """require_text 정밀 검증. 'excluded' / 'ambiguous' / 'confirmed' 중 하나를 반환.
 
-    - 제목이 회사명으로 시작 -> 'confirmed' (관례상 확정 보도자료, 네트워크 요청 없이 빠름)
-    - 그 외에는 기사 본문을 직접 열어서 확인한다. 네이버가 주는 짧은 요약(description)만
+    - 제목 어디에든 회사명이 (조사 결합 포함) 등장 -> 'confirmed' (제목은 편집자가 직접
+      정한 것이라 이미 충분히 강한 신호. "[#IT라운지] 딥파인 '국가전략사업'..."처럼
+      맨 앞이 아니라 중간에 나와도 인정 - 예전엔 title.startswith(company)만 봐서
+      이런 경우 놓쳤음. 네트워크 요청 없이 빠름)
+    - 그 외(제목엔 없고 본문/요약에만 있을 수 있음)에는 기사 본문을 직접 열어서 확인한다.
+      네이버가 주는 짧은 요약(description)만
       보고 "요약에 없으니 무관"으로 판단하면, [게시판]/[Tech & Now] 같은 여러 기업을
       한꺼번에 다루는 다이제스트형 기사에서 실제로는 회사명이 본문에 나오는데 요약에는
       빠져있어서 잘못 제외되는 문제가 있었다 (요약은 보통 첫 문단만 담고, 다이제스트
@@ -128,13 +132,14 @@ def _relevance_status(title: str, url: str, company: str, description: str) -> s
     'ambiguous'는 실제로 관련 있는 기사인데 문장 패턴이 다르게 쓰인 경우(예: "체결했다")도
     있을 수 있어서, 제외하지 않고 결과에는 포함하되 표시만 해서 사람이 확인하게 한다
     (여기서 확신 없다고 제외하면 진짜 기사를 놓칠 위험이 있음)."""
-    if title.strip().startswith(company):
+    if _contains_word(title, company):
         return "confirmed"
 
     text = _fetch_article_text(url)
     if text is None:
-        # 본문을 못 가져온 경우: 제목/요약에 단어로도 없으면 무관, 있으면 사람 확인
-        if _contains_word(title, company) or _contains_word(description, company):
+        # 본문을 못 가져온 경우: 요약에 단어로도 없으면 무관, 있으면 사람 확인
+        # (제목엔 없다는 건 이미 위에서 확인됨)
+        if _contains_word(description, company):
             return "ambiguous"
         return "excluded"
 
