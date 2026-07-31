@@ -47,8 +47,8 @@ def build_daily_sheet(wb, sheet_name, keyword_coverage):
                 auto_detected[domain] = media_name
             rows.append((k_index, keyword, media_name, item))
 
-    # 입력한 키워드 순서 -> 그 안에서 매체 우선순위 -> 게재 시각
-    rows.sort(key=lambda r: (r[0], media_sort_key(r[2]), r[3]["게재일자"]))
+    # 날짜순 정렬, 같은 시각이면 매체 우선순위로
+    rows.sort(key=lambda r: (r[3]["게재일자"], media_sort_key(r[2])))
 
     for i, (k_index, keyword, media_name, item) in enumerate(rows):
         row = 2 + i
