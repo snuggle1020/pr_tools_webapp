@@ -68,8 +68,53 @@ def resolve_media_name(url: str, domain_map: dict):
     return None, True  # 자동 인식도 실패
 
 
-def build_sheet(wb, sheet_name, title, company, distribution_date, coverage):
-    """coverage: naver_news.collect_coverage()가 반환한 리스트. 반환값: 매체명 미확인 도메인 집합."""
+def resolve_coverage(coverage):
+    """collect_coverage() 결과에 매체명을 채우고 매체 우선순위로 정렬.
+    반환값: (rows, 매체명 미확인 도메인 집합, 자동인식 {도메인: 매체명}).
+    rows는 원본 dict에 "매체명"을 채운 리스트 (엑셀/PDF 공용)."""
+    domain_map = load_domain_map()
+    unmapped_domains = set()
+    auto_detected = {}  # domain -> media_name (고정 목록엔 없지만 자동 인식 성공)
+
+    rows = []
+    for item in coverage:
+        domain = domain_of(item["URL"])
+        media_name, was_auto = resolve_media_name(item["URL"], domain_map)
+        if media_name is None:
+            unmapped_domains.add(domain)
+            media_name = f"[확인필요:{domain}]"
+        elif was_auto:
+            auto_detected[domain] = media_name
+        rows.append({**item, "매체명": media_name})
+
+    # 매체 우선순위로 정렬(통신사>일간지>경제지>IT전문지>산업지>온라인매체), 같은 매체면 날짜순
+    rows.sort(key=lambda r: (media_sort_key(r["매체명"]), r["게재일자"]))
+    return rows, unmapped_domains, auto_detected
+
+
+EXTRA_PORTALS = ("다음", "구글")  # 네이버 API로는 수집 안 돼서 담당자가 수동으로 확인해 넣는 포털
+
+
+def apply_manual_portals(rows, extra=None, manual=None):
+    """수동 확인한 다음/구글 게재 정보를 합친다 (엑셀/PDF 공용).
+    extra: {URL: {"다음", "구글"}} - 네이버로 수집된 기사가 다음/구글에도 노출된 경우.
+    manual: [{"매체명", "제목", "URL", "게재일자"(datetime), "포털": ["다음", "구글"]}]
+            - 네이버에는 없고 다음/구글에서만 확인된 기사.
+    각 행에 "포털"(리스트)과 "게재포털"("네이버/다음/구글" 형식 문자열)을 채워서 반환."""
+    extra = extra or {}
+    out = []
+    for r in rows:
+        portals = ["네이버"] + [p for p in EXTRA_PORTALS if p in extra.get(r["URL"], ())]
+        out.append({**r, "포털": portals, "게재포털": "/".join(portals)})
+    for m in manual or []:
+        portals = [p for p in EXTRA_PORTALS if p in m["포털"]]
+        out.append({**m, "포털": portals, "게재포털": "/".join(portals), "네이버CP": False})
+    out.sort(key=lambda r: (media_sort_key(r["매체명"]), r["게재일자"]))
+    return out
+
+
+def build_sheet(wb, sheet_name, title, company, distribution_date, rows):
+    """rows: resolve_coverage()가 반환한 (매체명 채워지고 정렬된) 리스트."""
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
     ws = wb.create_sheet(sheet_name, 0)  # 맨 왼쪽에 생성
@@ -113,31 +158,11 @@ def build_sheet(wb, sheet_name, title, company, distribution_date, coverage):
         cell.fill = HEADER_FILL
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    domain_map = load_domain_map()
-    unmapped_domains = set()
-    auto_detected = {}  # domain -> media_name (고정 목록엔 없지만 자동 인식 성공)
-
-    enriched = []
-    for item in coverage:
-        domain = domain_of(item["URL"])
-        media_name, was_auto = resolve_media_name(item["URL"], domain_map)
-        if media_name is None:
-            unmapped_domains.add(domain)
-            media_name = f"[확인필요:{domain}]"
-        elif was_auto:
-            auto_detected[domain] = media_name
-        enriched.append((media_name, item))
-
-    # 매체 우선순위로 정렬(통신사>일간지>경제지>IT전문지>산업지>온라인매체), 같은 매체면 날짜순
-    enriched.sort(
-        key=lambda pair: (media_sort_key(pair[0]), pair[1]["게재일자"])
-    )
-
-    for i, (media_name, item) in enumerate(enriched):
+    for i, item in enumerate(rows):
         row = 8 + i
         values = [
             i + 1,
-            media_name,
+            item["매체명"],
             item["제목"],
             item["URL"],
             item["게재일자"],
@@ -152,8 +177,7 @@ def build_sheet(wb, sheet_name, title, company, distribution_date, coverage):
                 cell.alignment = Alignment(horizontal="left", vertical="center")
             if col == 5:  # URL 열(E) 왼쪽 정렬 + 하이퍼링크
                 cell.alignment = Alignment(horizontal="left", vertical="center")
-                cell.hyperlink = v
+                if v:
+                    cell.hyperlink = v
             if col == 6:  # 게재일자 열(F) 포맷: 2026-07-02
                 cell.number_format = "yyyy-mm-dd"
-
-    return unmapped_domains, auto_detected

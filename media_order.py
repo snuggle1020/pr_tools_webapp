@@ -117,3 +117,9 @@ def media_sort_key(media_name: str):
 
     cat = FALLBACK_CATEGORY.get(media_name, DEFAULT_CATEGORY)
     return (CATEGORY_ORDER.index(cat), len(MEDIA_PRIORITY), media_name)
+
+
+def media_category(media_name: str) -> str:
+    """매체 유형(통신사/일간지/경제지/IT전문지/산업지/온라인매체) 반환. 미확인 매체는 '확인필요'."""
+    idx = media_sort_key(media_name)[0]
+    return CATEGORY_ORDER[idx] if idx < len(CATEGORY_ORDER) else "확인필요"

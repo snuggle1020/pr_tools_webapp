@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 PR 리포트 도구 웹앱.
-- 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 생성)
+- 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 + PDF 보고서 생성)
 - 탭2: 월간 PR리포트 (기존 워크북에 새 달 시트 추가 + 기사형식 자동분류)
 
 네이버 API 키는 Streamlit Cloud의 App settings > Secrets 에
@@ -9,13 +9,17 @@ NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
 """
 import io
 import os
-from datetime import date
+from datetime import date, datetime
 
 import openpyxl
+import pandas as pd
 import streamlit as st
 
 from naver_news import collect_coverage
-from report_sheet import build_sheet, derive_company, derive_keyword
+from report_sheet import (
+    EXTRA_PORTALS, apply_manual_portals, build_sheet, derive_company, derive_keyword, resolve_coverage,
+)
+from report_pdf import build_pdf
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
 from daily_collect_sheet import build_daily_sheet
 
@@ -77,8 +81,6 @@ with tab1:
         else:
             company = derive_company(title)
             keyword = derive_keyword(title)
-            st.caption(f"자동 인식: 기업명 **{company}** / 검색어 **{keyword}**")
-
             dist_str = distribution_date.strftime("%Y-%m-%d")
             with st.spinner(f"네이버에서 '{keyword}' 검색 중..."):
                 try:
@@ -90,43 +92,148 @@ with tab1:
                     coverage = None
 
             if coverage is not None:
-                sheet_name = distribution_date.strftime("%y%m%d")
-                if existing_file is not None:
-                    wb = openpyxl.load_workbook(existing_file)
-                else:
-                    wb = openpyxl.Workbook()
-                    wb.remove(wb.active)
-
                 with st.spinner("고정 목록에 없는 매체는 기사 페이지에서 매체명 자동 인식 중..."):
-                    unmapped, auto_detected = build_sheet(wb, sheet_name, title, company, dist_str, coverage)
-                wb.active = 0  # 새로 추가된(맨 왼쪽) 시트가 열리도록
+                    rows, unmapped, auto_detected = resolve_coverage(coverage)
+                # 다음·구글 수동 입력으로 화면이 다시 그려져도(rerun) 결과가 유지되도록 세션에 보관
+                st.session_state["report"] = {
+                    "title": title,
+                    "company": company,
+                    "keyword": keyword,
+                    "dist_date": distribution_date,
+                    "rows": rows,
+                    "unmapped": unmapped,
+                    "auto_detected": auto_detected,
+                    "existing": existing_file.getvalue() if existing_file is not None else None,
+                }
+                st.session_state["report_run"] = st.session_state.get("report_run", 0) + 1
 
-                buf = io.BytesIO()
-                wb.save(buf)
-                buf.seek(0)
+    report = st.session_state.get("report")
+    if report:
+        title, company = report["title"], report["company"]
+        dist_date = report["dist_date"]
+        dist_str = dist_date.strftime("%Y-%m-%d")
+        rows = report["rows"]
+        run = st.session_state["report_run"]  # 새로 생성할 때마다 입력표 초기화
 
-                request_date_str = date.today().strftime("%Y%m%d")
-                filename = f"결과보고서_{title}_{request_date_str}.xlsx"
+        st.caption(f"자동 인식: 기업명 **{company}** / 검색어 **{report['keyword']}**")
+        st.success(f"완료! 네이버 기사 {len(rows)}건 수집됨 (시트: {dist_date:%y%m%d}).")
+        if report["auto_detected"]:
+            lines = "\n".join(f"- {d} → {n}" for d, n in sorted(report["auto_detected"].items()))
+            st.info(
+                "다음 매체는 고정 목록에 없어서 기사 페이지에서 자동으로 인식했습니다 "
+                "(맞는지 확인해보고, domain_to_media.json에 추가해두면 다음부턴 더 빨라져요):\n"
+                + lines
+            )
+        if report["unmapped"]:
+            st.warning(
+                "매체명을 자동으로도 못 찾은 도메인: " + ", ".join(sorted(report["unmapped"]))
+                + " — 직접 확인해서 domain_to_media.json에 추가해주세요."
+            )
 
-                st.success(f"완료! 기사 {len(coverage)}건 수집됨 (시트: {sheet_name}).")
-                if auto_detected:
-                    lines = "\n".join(f"- {d} → {n}" for d, n in sorted(auto_detected.items()))
-                    st.info(
-                        "다음 매체는 고정 목록에 없어서 기사 페이지에서 자동으로 인식했습니다 "
-                        "(맞는지 확인해보고, domain_to_media.json에 추가해두면 다음부턴 더 빨라져요):\n"
-                        + lines
-                    )
-                if unmapped:
-                    st.warning(
-                        "매체명을 자동으로도 못 찾은 도메인: " + ", ".join(sorted(unmapped))
-                        + " — 직접 확인해서 domain_to_media.json에 추가해주세요."
-                    )
-                st.download_button(
-                    "⬇️ 엑셀 다운로드",
-                    data=buf,
-                    file_name=filename,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+        st.markdown("##### 다음·구글 게재 반영 (선택)")
+        st.caption(
+            "다음·구글은 자동 수집이 안 됩니다. 직접 확인한 내용을 아래에 체크·입력하면 "
+            "PDF와 엑셀의 '게재 포털'과 집계에 바로 반영됩니다."
+        )
+
+        flags = st.data_editor(
+            pd.DataFrame(
+                [{"매체명": r["매체명"], "제목": r["제목"], "게재일": r["게재일자"].date(),
+                  "다음": False, "구글": False} for r in rows],
+                columns=["매체명", "제목", "게재일", "다음", "구글"],
+            ),
+            disabled=["매체명", "제목", "게재일"],
+            hide_index=True,
+            width="stretch",
+            key=f"portal_flags_{run}",
+            column_config={
+                "다음": st.column_config.CheckboxColumn("다음에도 노출", width="small"),
+                "구글": st.column_config.CheckboxColumn("구글에도 노출", width="small"),
+            },
+        )
+        extra = {
+            rows[i]["URL"]: {p for p in EXTRA_PORTALS if bool(flags.iloc[i][p])}
+            for i in range(len(rows))
+        }
+
+        st.caption("네이버에는 없고 다음·구글에서만 찾은 기사는 아래 표에 행을 추가해서 입력하세요.")
+        manual_df = st.data_editor(
+            pd.DataFrame({
+                "매체명": pd.Series(dtype="str"),
+                "제목": pd.Series(dtype="str"),
+                "URL": pd.Series(dtype="str"),
+                "게재일": pd.Series(dtype="object"),
+                "다음": pd.Series(dtype="bool"),
+                "구글": pd.Series(dtype="bool"),
+            }),
+            num_rows="dynamic",
+            hide_index=True,
+            width="stretch",
+            key=f"manual_articles_{run}",
+            column_config={
+                "게재일": st.column_config.DateColumn("게재일", default=dist_date, format="YYYY-MM-DD"),
+                "다음": st.column_config.CheckboxColumn("다음", default=False, width="small"),
+                "구글": st.column_config.CheckboxColumn("구글", default=True, width="small"),
+            },
+        )
+        manual, skipped = [], 0
+        for _, m in manual_df.iterrows():
+            media, art_title, url = (
+                "" if pd.isna(m.get(k)) else str(m.get(k)).strip() for k in ("매체명", "제목", "URL")
+            )
+            portals = [p for p in EXTRA_PORTALS if m.get(p) == True]  # noqa: E712 (NaN/None 은 False)
+            if not (media or art_title or url):
+                continue  # 빈 행
+            if not (media and art_title and url and portals):
+                skipped += 1
+                continue
+            pub = m.get("게재일")
+            pub = pub if isinstance(pub, date) and not pd.isna(pub) else dist_date
+            manual.append({
+                "매체명": media, "제목": art_title, "URL": url,
+                "게재일자": datetime.combine(pub, datetime.min.time()), "포털": portals,
+            })
+        if skipped:
+            st.warning(f"매체명·제목·URL·포털(다음/구글) 중 빈 칸이 있는 {skipped}개 행은 보고서에서 빠졌습니다.")
+
+        final_rows = apply_manual_portals(rows, extra, manual)
+
+        if report["existing"] is not None:
+            wb = openpyxl.load_workbook(io.BytesIO(report["existing"]))
+        else:
+            wb = openpyxl.Workbook()
+            wb.remove(wb.active)
+        build_sheet(wb, dist_date.strftime("%y%m%d"), title, company, dist_str, final_rows)
+        wb.active = 0  # 새로 추가된(맨 왼쪽) 시트가 열리도록
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        pdf_bytes = build_pdf(title, company, dist_str, final_rows, window_days=REPORT_WINDOW_DAYS)
+
+        n_extra = sum(len(v) > 0 for v in extra.values()) + len(manual)
+        if n_extra:
+            st.caption(f"다음·구글 반영: {n_extra}건 (보고서 총 {len(final_rows)}건)")
+
+        filename = f"결과보고서_{title}_{date.today():%Y%m%d}.xlsx"
+        # on_click="ignore": 한쪽을 받아도 화면이 다시 그려지지 않아서 나머지 버튼이 유지됨
+        d1, d2 = st.columns(2)
+        d1.download_button(
+            "📑 PDF 보고서 다운로드",
+            data=pdf_bytes,
+            file_name=filename.removesuffix(".xlsx") + ".pdf",
+            mime="application/pdf",
+            type="primary",
+            width="stretch",
+            on_click="ignore",
+        )
+        d2.download_button(
+            "⬇️ 엑셀 다운로드",
+            data=buf,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            width="stretch",
+            on_click="ignore",
+        )
 
 # ------------------------------------------------------------------
 # 탭 2: 월간 PR리포트

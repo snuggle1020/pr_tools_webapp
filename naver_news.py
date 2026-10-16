@@ -209,7 +209,7 @@ def collect_coverage(
     False면 require_text가 단어로 등장하기만 하면 다 포함한다(빠름, 본문 조회 없음)
     - "이 키워드 걸린 기사를 그냥 다 모아줘"라는 네이버 기사 수집 탭에 맞는 동작.
 
-    반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버"}, ...]
+    반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버", "네이버CP": bool}, ...]
     URL 기준 중복 제거, 게재일자 오름차순 정렬.
     """
     dist_dt = datetime.strptime(distribution_date, "%Y-%m-%d")
@@ -252,6 +252,8 @@ def collect_coverage(
                 "URL": url,
                 "게재일자": pub_dt,
                 "게재포털": "네이버",  # API 출처 표시. 구글/다음 게재 여부는 수동 확인 필요
+                # 네이버 뉴스 인링크(n.news.naver.com)가 있으면 콘텐츠제휴(CP) 매체, 없으면 검색제휴
+                "네이버CP": "n.news.naver.com" in (item.get("link") or ""),
             }
         )
 
