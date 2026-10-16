@@ -76,16 +76,15 @@ def _register_fonts():
 
 
 def _runs(text, font):
-    """(문자열, 폰트) 조각 목록. 기본 폰트에 없는 글자는 나눔고딕, 둘 다 없으면 생략.
-    깨진 문자(U+FFFD, 원문 인코딩 오류)는 공백으로 바꾼다."""
-    text = re.sub("�+", " ", text)
+    """(문자열, 폰트) 조각 목록. 기본 폰트에 없는 글자(한자 등)는 보조 폰트로 찍고,
+    둘 다 없는 글자나 깨진 문자(U+FFFD, 원문 인코딩 오류)는 공백으로 바꾼다 ("출범���SAP" -> "출범 SAP")."""
     fb = FALLBACK.get(font, font)
+    main, sub = _cmaps[font], _cmaps[fb]
+    text = "".join(ch if ch == " " or ord(ch) in main or ord(ch) in sub else " " for ch in text)
+    text = re.sub(" {2,}", " ", text)
     runs = []
     for ch in text:
-        cp = ord(ch)
-        f = font if cp in _cmaps[font] or ch == " " else fb if cp in _cmaps[fb] else None
-        if f is None:
-            continue
+        f = font if ch == " " or ord(ch) in main else fb
         if runs and runs[-1][1] == f:
             runs[-1][0] += ch
         else:
@@ -431,14 +430,19 @@ def _table_rows(arts):
     return rows
 
 
-def _draw_table_page(p, top, rows, first, categories_text, extra_text):
+TABLE_DESC = (
+    "포털 노출 순(네이버 CP → 네이버 검색제휴 → 다음 → 구글)으로, 같은 포털 안에서는 매체 영향력 순"
+    "(통신사 → 일간지 → 주요 경제지 → IT전문지 → 산업지 → 일반 경제지 → 온라인매체)으로 정렬했습니다. "
+    "제목을 누르면 기사 원문으로 이동합니다."
+)
+
+
+def _draw_table_page(p, top, rows, first):
     """rows 를 한 페이지 카드에 들어가는 만큼 그리고, 남은 rows 반환."""
     x = X0
     head_top = top + 18
     if first:
-        desc = (f"네이버 CP사, 검색제휴사({categories_text}){extra_text} 순으로 정렬했습니다. "
-                "묶음 기사는 여러 기업의 소식을 함께 다룬 기사입니다. 제목을 누르면 기사 원문으로 이동합니다.")
-        desc_lines = _wrap(desc, REG, 9.8, W - 50)
+        desc_lines = _wrap(TABLE_DESC, REG, 9.8, W - 50)
         hdr = head_top + 24 + 15 * len(desc_lines) + 10
     else:
         hdr = head_top
@@ -466,31 +470,37 @@ def _draw_table_page(p, top, rows, first, categories_text, extra_text):
     p.hline(x + 15, hdr + 14, W - 30)
 
     for row_top, (a, lines, media_lines, h) in used:
-        text_top = row_top + 7
-        mid = text_top + 3.5  # 첫 줄 가운데 (점·기사유형 표시 기준선)
-        p.text(x + COLS[0][1], text_top, str(a["no"]), size=ROW_FONT, color=MUTED)
+        mid = row_top + h / 2  # 행 세로 가운데 - 모든 칸을 여기에 맞춤
+
+        def ctop(n_lines):  # n줄짜리 글 묶음이 행 가운데 오도록 하는 첫 줄 top
+            return mid - (n_lines - 1) * ROW_LEAD / 2 - 0.45 * ROW_FONT
+
+        one = ctop(1)
+        p.text(x + COLS[0][1], one, str(a["no"]), size=ROW_FONT, color=MUTED)
         p.c.setFillColor(PORTAL_COLOR[a["portal"]])
-        p.c.circle(x + COLS[1][1] + 2.5, p.y(mid - 0.5), 2.5, stroke=0, fill=1)
+        p.c.circle(x + COLS[1][1] + 2.5, p.y(mid), 2.5, stroke=0, fill=1)
+        mt = ctop(len(media_lines))
         for k, ml in enumerate(media_lines):
-            p.text(x + COLS[1][1] + 10, text_top + k * ROW_LEAD, ml, font=SEMI, size=ROW_FONT)
+            p.text(x + COLS[1][1] + 10, mt + k * ROW_LEAD, ml, font=SEMI, size=ROW_FONT)
+        tt = ctop(len(lines))
         for k, line in enumerate(lines):
             if k == 0 and a["review"]:
                 tag = "[확인필요] "
-                nx = p.text(x + COLS[2][1], text_top, tag, font=SEMI, size=ROW_FONT, color=ORANGE)
-                p.text(nx, text_top, line[len(tag):], size=ROW_FONT)
+                nx = p.text(x + COLS[2][1], tt, tag, font=SEMI, size=ROW_FONT, color=ORANGE)
+                p.text(nx, tt, line[len(tag):], size=ROW_FONT)
             else:
-                p.text(x + COLS[2][1], text_top + k * ROW_LEAD, line, size=ROW_FONT)
+                p.text(x + COLS[2][1], tt + k * ROW_LEAD, line, size=ROW_FONT)
         p.link(a["url"], x + COLS[2][1], row_top, COLS[2][2], h)
-        p.text(x + COLS[3][1], text_top, a["category"], size=ROW_FONT, color=MUTED)
+        p.text(x + COLS[3][1], one, a["category"], size=ROW_FONT, color=MUTED)
 
         if a["kind"] == "묶음":  # 단독과 같은 톤에서 옅은 회색 바탕으로만 구분
             p.rect(x + COLS[4][1], mid - 8, 29, 16, fill=PILL_BG, r=8)
         else:
             p.rect(x + COLS[4][1], mid - 8, 29, 16, stroke=LINE, r=8, lw=0.8)
-        p.text(x + COLS[4][1] + 14.5, mid - 4.3, a["kind"], size=ROW_FONT, color=MUTED, align="center")
+        p.text(x + COLS[4][1] + 14.5, one, a["kind"], size=ROW_FONT, color=MUTED, align="center")
 
-        p.text(x + COLS[5][1], text_top, f"{a['dt'].month}.{a['dt'].day:02d}", size=ROW_FONT, color=MUTED)
-        p.text(x + COLS[6][1], text_top, a["portals_text"], size=ROW_FONT, color=MUTED)
+        p.text(x + COLS[5][1], one, f"{a['dt'].month}.{a['dt'].day:02d}", size=ROW_FONT, color=MUTED)
+        p.text(x + COLS[6][1], one, a["portals_text"], size=ROW_FONT, color=MUTED)
         p.hline(x + 15, row_top + h, W - 30)
 
     rest = rows[len(used):]
@@ -541,9 +551,6 @@ def build_pdf(title, company, distribution_date, rows, window_days=3, generated_
     top = _draw_featured(p, top, arts, limit=PAGE_H - 28 - _bar_cards_height(arts))  # 1쪽은 꼬리말이 없어 여백을 좁게
     top = _draw_bar_cards(p, top, arts)
 
-    present = [cat for cat in CATEGORY_ORDER if any(a["category"] == cat for a in arts)]
-    categories_text = "·".join(present) or "-"
-    extra_text = "".join(f", {n}" for n in ("다음", "구글") if any(a["portal"] == n for a in arts))
     remaining = _table_rows(arts)
     first = True
     while True:
@@ -555,7 +562,7 @@ def build_pdf(title, company, distribution_date, rows, window_days=3, generated_
                 p.text(X0 + 15, TOP + 46, "집계 기간 내 수집된 기사가 없습니다.", color=MUTED)
                 end = TOP + 80
             break
-        end, remaining = _draw_table_page(p, TOP, remaining, first, categories_text, extra_text)
+        end, remaining = _draw_table_page(p, TOP, remaining, first)
         first = False
         if not remaining:
             break
