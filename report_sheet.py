@@ -87,12 +87,22 @@ def resolve_coverage(coverage):
             auto_detected[domain] = media_name
         rows.append({**item, "매체명": media_name})
 
-    # 매체 우선순위로 정렬(통신사>일간지>경제지>IT전문지>산업지>온라인매체), 같은 매체면 날짜순
-    rows.sort(key=lambda r: (media_sort_key(r["매체명"]), r["게재일자"]))
+    rows.sort(key=report_sort_key)
     return rows, unmapped_domains, auto_detected
 
 
 EXTRA_PORTALS = ("다음", "구글")  # 네이버 API로는 수집 안 돼서 담당자가 수동으로 확인해 넣는 포털
+
+
+def report_sort_key(row):
+    """보고서 정렬 (엑셀/PDF 공통): 포털(네이버 CP > 네이버 검색제휴 > 다음 > 구글)
+    -> 매체 순서(media_order.MEDIA_GROUPS) -> 게재일. 여러 포털에 실린 기사는 가장 앞선 포털 기준."""
+    portals = row.get("포털") or ["네이버"]
+    if "네이버" in portals:
+        portal = 0 if row.get("네이버CP") else 1
+    else:
+        portal = 2 if "다음" in portals else 3
+    return (portal, media_sort_key(row["매체명"]), row["게재일자"])
 
 
 def apply_manual_portals(rows, extra=None, manual=None):
@@ -109,7 +119,7 @@ def apply_manual_portals(rows, extra=None, manual=None):
     for m in manual or []:
         portals = [p for p in EXTRA_PORTALS if p in m["포털"]]
         out.append({**m, "포털": portals, "게재포털": "/".join(portals), "네이버CP": False})
-    out.sort(key=lambda r: (media_sort_key(r["매체명"]), r["게재일자"]))
+    out.sort(key=report_sort_key)
     return out
 
 
