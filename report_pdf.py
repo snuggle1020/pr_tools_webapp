@@ -39,7 +39,6 @@ GRAY = HexColor("#C8CDD8")
 ORANGE = HexColor("#B45309")     # [확인필요] 표시
 PILL_BG = HexColor("#EEF0F4")    # 묶음 기사 표시 바탕
 WHITE = HexColor("#FFFFFF")
-TITLE_BG = HexColor("#F4F6F9")   # 보도자료 제목 박스
 WEEKDAYS = "월화수목금토일"
 
 PAGE_W, PAGE_H = A4
@@ -221,15 +220,15 @@ def _korean_date(d, with_year=True):
 
 
 def _period_text(start, end):
+    """예: 10월 15일 ~ 10월 16일 (하루면 10월 15일)"""
     if start == end:
         return _korean_date(start, False)
-    if start.month == end.month:
-        return f"{start.month}월 {start.day}일~{end.day}일"
-    return f"{start.month}월 {start.day}일~{end.month}월 {end.day}일"
+    return f"{_korean_date(start, False)} ~ {_korean_date(end, False)}"
 
 
 def _draw_header(p, company, title, dist_dt, last_dt):
-    """[기업명 굵게 + 보고서명 같은 크기 회색] 한 줄 > 배포일·집계일 > 보도자료 제목 박스."""
+    """[기업명 굵게 + 보고서명] 한 줄 > 정보 카드(보도자료 제목 / 배포일·집계일).
+    정보 카드는 아래 핵심 수치 카드와 같은 모양·여백이고, 집계일 칸은 수치 카드의 3번째 칸 위치에 맞춘다."""
     company = re.sub(r"\s*[(（].*?[)）]", "", company).strip() or company  # 괄호 부분 제외
     size = 21
     report_name = "보도자료 배포 결과보고서"
@@ -240,26 +239,36 @@ def _draw_header(p, company, title, dist_dt, last_dt):
     else:  # 기업명이 길면 보고서명은 다음 줄로
         top += size + 9
         p.text(X0, top, report_name, font=MED, size=size, color=SUBTITLE)
+    top += size + 18
 
-    top += size + 17
-    x = X0
-    for label, value in [
-        ("배포일", f"{_korean_date(dist_dt)}({WEEKDAYS[dist_dt.weekday()]})"),
-        ("집계일", _period_text(dist_dt, last_dt)),
-    ]:
-        x = p.text(x, top + 0.8, label, font=MED, size=9.5, color=MUTED)
-        x = p.text(x + 7, top, value, font=SEMI, size=10.5) + 22
+    pad = 15
+    col_w = (W - 2 * pad) / 5
+    lines = _wrap(title, BOLD, 13, W - 2 * pad)
+    meta_h = 34
+    h = pad + 2 + 16 + 19 * len(lines) + 8 + 12 + meta_h + pad - 2
+    p.rect(X0, top, W, h, fill=WHITE, stroke=LINE, r=10)
 
-    top += 24
-    lines = _wrap(title, SEMI, 12, W - 32)
-    h = 16 + 12 + 6 + 17 * len(lines) + 12
-    p.rect(X0, top, W, h, fill=TITLE_BG, r=8)
-    p.text(X0 + 16, top + 16, "보도자료 제목", font=MED, size=8.5, color=MUTED)
-    t = top + 16 + 12 + 6
+    t = top + pad + 2
+    p.text(X0 + pad, t, "보도자료 제목", font=MED, size=9, color=MUTED)
+    t += 16
     for line in lines:
-        p.text(X0 + 16, t, line, font=SEMI, size=12)
-        t += 17
-    return top + h + 14
+        p.text(X0 + pad, t, line, font=BOLD, size=13)
+        t += 19
+    t += 8
+    p.hline(X0 + pad, t, W - 2 * pad)
+    t += 12
+
+    meta = [
+        ("배포일", f"{_korean_date(dist_dt)} {WEEKDAYS[dist_dt.weekday()]}요일"),
+        ("집계일", _period_text(dist_dt, last_dt)),
+    ]
+    for i, (label, value) in enumerate(meta):
+        cx = X0 + pad + i * col_w * 2 + (0 if i == 0 else 15)
+        p.text(cx, t, label, font=MED, size=9, color=MUTED)
+        p.text(cx, t + 15, value, font=SEMI, size=11)
+        if i:
+            p.vline(X0 + pad + i * col_w * 2, t - 2, meta_h - 4)
+    return top + h + 12
 
 
 def _draw_summary_card(p, top, arts, kpis):
