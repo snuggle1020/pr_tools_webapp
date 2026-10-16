@@ -51,7 +51,7 @@ PORTALS = [("네이버 CP", BLUE), ("네이버 검색제휴", LIGHT_BLUE), ("다
 PORTAL_COLOR = dict(PORTALS)
 PORTAL_RANK = {name: i for i, (name, _) in enumerate(PORTALS)}
 REVIEW_PREFIX = "[확인필요] "
-MAX_FEATURED = 6
+FEATURED_COUNT = 4  # 주요 매체 게재 기사 수
 
 # Pretendard에는 한자(韓·美·中 등)가 없어서, 없는 글자만 Noto Sans KR로 찍는다.
 # fonts/NotoSansKR-Hanja-*.ttf 는 Noto Sans KR(OFL) 가변폰트를 굵기 고정 + 한자 영역만 남겨 줄인 파일.
@@ -116,6 +116,16 @@ def _wrap(text, font, size, width):
     if cur:
         lines.append(cur)
     return lines or [""]
+
+
+def _clip_lines(lines, font, size, width, max_lines):
+    """줄 수를 max_lines 로 자르고, 잘렸으면 마지막 줄 끝에 … 를 붙인다."""
+    if len(lines) <= max_lines:
+        return lines
+    last = lines[max_lines - 1]
+    while last and _sw(last + "…", font, size) > width:
+        last = last[:-1]
+    return lines[:max_lines - 1] + [last.rstrip() + "…"]
 
 
 class _Page:
@@ -235,8 +245,9 @@ def _draw_header(p, company, title, dist_dt, last_dt):
     top = TOP
     if x + 8 + _sw(report_name, MED, size) <= X0 + W:
         p.text(x + 8, top, report_name, font=MED, size=size, color=SUBTITLE)
-    else:  # 기업명이 길면 보고서명은 다음 줄로
-        top += size + 9
+    else:  # 기업명이 길면 보고서명은 다음 줄에 조금 작게
+        top += size + 6
+        size = 15
         p.text(X0, top, report_name, font=MED, size=size, color=SUBTITLE)
     top += size + 18
 
@@ -275,7 +286,7 @@ def _draw_summary_card(p, top, arts, kpis):
     inner_w = W - 2 * pad
     n = len(arts)
     gap = 4
-    per_row, sq_h = (n, 24) if n <= 30 else (30, 24) if n <= 60 else (50, 12)
+    per_row, sq_h = (n, 24) if n <= 30 else (30, 16) if n <= 60 else (50, 10)  # 기사가 많으면 막대를 낮춰 1쪽에 맞춤
     sq_w = (inner_w - gap * (per_row - 1)) / per_row if per_row else 0
     sq_rows = -(-n // per_row) if n else 0
 
@@ -314,40 +325,44 @@ def _draw_summary_card(p, top, arts, kpis):
 
 
 def _draw_featured(p, top, arts, limit):
-    """선정 규칙:
-    1) 네이버 CP사 기사가 있으면 CP사 기사 (최대 MAX_FEATURED건)
-    2) 없으면 네이버 노출 기사 중 매체 영향력 순(media_order 우선순위) 상위 4건 - 한 매체당 1건
-    3) 둘 다 없으면 이 칸을 그리지 않음
-    limit: 이 높이(top 좌표)를 넘기지 않는 카드 줄까지만 그림 (1쪽 넘침 방지)."""
-    cp = [a for a in arts if a["cp"]]
-    if cp:
-        subtitle, picks = "네이버 뉴스 콘텐츠제휴(CP) 매체에 실린 기사", cp[:MAX_FEATURED]
-    else:
-        subtitle, picks, seen = "네이버 뉴스 탭에 실린 주요 매체 기사", [], set()
-        for a in sorted((a for a in arts if a["naver"]), key=lambda a: (media_sort_key(a["media"]), a["dt"])):
-            if a["media"] not in seen:
-                seen.add(a["media"])
-                picks.append(a)
-        picks = picks[:4]
+    """주요 매체 게재 기사 FEATURED_COUNT(4)건 선정:
+    표와 같은 순서(네이버 CP > 네이버 검색제휴 > 다음 > 구글, 같은 포털 안에서는 매체 영향력 순)로
+    위에서부터 한 매체당 1건씩 고르고, 매체가 모자라면 같은 매체의 다른 기사로 채운다.
+    기사가 4건 미만이면 있는 만큼, 0건이면 이 칸을 그리지 않는다.
+    카드 제목은 최대 2줄(넘치면 …)로 잘라 4건이 항상 1쪽에 들어가게 한다.
+    limit: 이 높이(top 좌표)를 넘기지 않는 카드 줄까지만 그림 (1쪽 넘침 방지 안전장치)."""
+    picks, seen = [], set()
+    for a in arts:  # arts 는 이미 표 순서로 정렬돼 있음 (_prepare)
+        if a["media"] not in seen:
+            seen.add(a["media"])
+            picks.append(a)
+    picks += [a for a in arts if a not in picks]
+    picks = picks[:FEATURED_COUNT]
+
     gap = 10
     cw = (W - gap) / 2
-    card_rows = []
-    head_h = 22 + 40
-    used = top + head_h
-    for i in range(0, len(picks), 2):
-        pair = picks[i:i + 2]
-        wrapped = [_wrap(a["title"], MED, 9.8, cw - 30) for a in pair]
-        h = 40 + 15 * max(len(w) for w in wrapped)
-        if used + h > limit:
-            break
-        card_rows.append((pair, wrapped, h))
-        used += h + 8
+
+    def layout(max_lines):
+        rows, used = [], top + 22 + 40
+        for i in range(0, len(picks), 2):
+            pair = picks[i:i + 2]
+            wrapped = [_clip_lines(_wrap(a["title"], MED, 9.8, cw - 30), MED, 9.8, cw - 30, max_lines) for a in pair]
+            h = 40 + 15 * max(len(w) for w in wrapped)
+            if used + h > limit:
+                break
+            rows.append((pair, wrapped, h))
+            used += h + 8
+        return rows
+
+    card_rows = layout(2)
+    if sum(len(pair) for pair, _, _ in card_rows) < len(picks):
+        card_rows = layout(1)  # 공간이 빠듯하면 제목을 1줄로 줄여 4건을 모두 넣음
     if not card_rows:
         return top
 
     top += 22
-    p.text(X0, top, "주요 매체 게재", font=BOLD, size=13.5)
-    p.text(X0, top + 21, subtitle, size=9.3, color=MUTED)
+    p.text(X0, top, "주요 매체 게재 기사", font=BOLD, size=13.5)
+    p.text(X0, top + 21, "네이버 CP 매체를 우선으로, 매체 영향력이 높은 순으로 선정한 기사", size=9.3, color=MUTED)
     top += 40
 
     for pair, wrapped, h in card_rows:
@@ -366,9 +381,18 @@ def _draw_featured(p, top, arts, limit):
     return top
 
 
-def _bar_cards_height(arts):
+def _bar_rows(arts):
     n_cats = len({a["category"] for a in arts})
-    return 16 + 70 + 21.5 * max(len(_shown_portals(arts)), n_cats, 1) + 10
+    return max(len(_shown_portals(arts)), n_cats, 1)
+
+
+def _bar_row_h(n_rows):
+    return 21.5 if n_rows <= 4 else 17  # 매체 유형이 많으면 줄 간격을 좁혀 1쪽에 맞춤
+
+
+def _bar_cards_height(arts):
+    n = _bar_rows(arts)
+    return 16 + 70 + _bar_row_h(n) * n + 10
 
 
 def _draw_bar_cards(p, top, arts):
@@ -384,8 +408,9 @@ def _draw_bar_cards(p, top, arts):
     top += 16
     gap = 10
     cw = (W - gap) / 2
-    row_h = 21.5
-    h = 70 + row_h * max(len(portal_rows), len(cat_rows), 1) + 10
+    n_rows = max(len(portal_rows), len(cat_rows), 1)
+    row_h = _bar_row_h(n_rows)
+    h = 70 + row_h * n_rows + 10
     cards = [
         ("포털 노출 구분", "네이버 노출 기사는 CP·검색제휴로 나눠 집계", portal_rows),
         ("매체 유형", "게재 매체의 성격별 분포", cat_rows),
