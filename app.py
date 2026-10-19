@@ -9,6 +9,7 @@ NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
 """
 import io
 import os
+import re
 from datetime import date, datetime
 
 import openpyxl
@@ -18,9 +19,10 @@ import streamlit as st
 from naver_news import collect_coverage
 from report_sheet import (
     EXTRA_PORTALS, LOW_RELEVANCE, apply_manual_portals, build_sheet, derive_company, derive_keyword,
-    resolve_coverage, title_relevance,
+    load_domain_map, resolve_coverage, title_relevance,
 )
 from report_pdf import build_pdf
+from article_meta import fetch_article_meta, normalize_url
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
 from daily_collect_sheet import build_daily_sheet
 
@@ -174,24 +176,67 @@ with tab1:
         if n_excluded:
             st.caption(f"포함 해제: {n_excluded}건은 PDF·엑셀에서 빠집니다.")
 
-        st.caption("네이버에는 없고 다음·구글에서만 찾은 기사는 아래 표에 행을 추가해서 입력하세요.")
+        st.markdown("###### 다음·구글에서만 찾은 기사")
+        st.caption(
+            "기사 링크를 한 줄에 하나씩 붙여넣고 **기사 정보 불러오기**를 누르면 매체명·제목·게재일을 자동으로 채웁니다. "
+            "네이버 목록에 이미 있는 기사 링크면 그 기사에 다음·구글 노출로 반영됩니다."
+        )
+        u1, u2 = st.columns(2)
+        daum_text = u1.text_area("다음에서 찾은 기사 URL", key=f"daum_urls_{run}", height=110,
+                                 placeholder="https://www.example.co.kr/news/...")
+        google_text = u2.text_area("구글에서 찾은 기사 URL", key=f"google_urls_{run}", height=110,
+                                   placeholder="https://www.example.co.kr/news/...")
+        fetched_key = f"fetched_{run}"
+        if st.button("기사 정보 불러오기", key=f"fetch_btn_{run}"):
+            portals_by_url = {}
+            for portal, text in (("다음", daum_text), ("구글", google_text)):
+                for u in re.findall(r"https?://[^\s<>\"']+", text or ""):
+                    portals_by_url.setdefault(u.rstrip(".,)"), set()).add(portal)
+            naver_by_url = {normalize_url(r["URL"]): r["URL"] for r in rows}
+            matched, fetched = {}, []
+            with st.spinner(f"기사 {len(portals_by_url)}건 정보 불러오는 중..."):
+                domain_map = load_domain_map()
+                for u, ps in portals_by_url.items():
+                    naver_url = naver_by_url.get(normalize_url(u))
+                    if naver_url:
+                        matched.setdefault(naver_url, set()).update(ps)
+                        continue
+                    meta = fetch_article_meta(u, domain_map)
+                    meta["포털"] = ps
+                    fetched.append(meta)
+            prev_n = st.session_state.get(fetched_key, {}).get("n", 0)
+            st.session_state[fetched_key] = {"matched": matched, "fetched": fetched, "n": prev_n + 1}
+        fetched_state = st.session_state.get(fetched_key, {"matched": {}, "fetched": [], "n": 0})
+
+        for url, ps in fetched_state["matched"].items():
+            if url in extra:  # 포함 해제한 기사는 그대로 제외
+                extra[url] |= ps
+        if fetched_state["matched"]:
+            st.caption(f"네이버 목록에 있는 기사 {len(fetched_state['matched'])}건은 다음·구글 노출로 반영했습니다.")
+
+        manual_cols = ["매체명", "제목", "게재일", "다음", "구글", "URL", "비고"]
+        manual_src = pd.DataFrame(
+            [{"매체명": m["매체명"], "제목": m["제목"],
+              "게재일": m["게재일자"].date() if m["게재일자"] else dist_date,
+              "다음": "다음" in m["포털"], "구글": "구글" in m["포털"], "URL": m["URL"],
+              "비고": m["note"] + (" → 게재일은 배포일로 넣음" if not m["게재일자"] else "")}
+             for m in fetched_state["fetched"]],
+            columns=manual_cols,
+        ).astype({"매체명": "str", "제목": "str", "다음": "bool", "구글": "bool", "URL": "str", "비고": "str"})
+        if fetched_state["fetched"]:
+            st.caption("불러온 내용이 틀리면 표에서 바로 고치세요. 뺄 기사는 행을 선택해 삭제하면 됩니다.")
         manual_df = st.data_editor(
-            pd.DataFrame({
-                "매체명": pd.Series(dtype="str"),
-                "제목": pd.Series(dtype="str"),
-                "URL": pd.Series(dtype="str"),
-                "게재일": pd.Series(dtype="object"),
-                "다음": pd.Series(dtype="bool"),
-                "구글": pd.Series(dtype="bool"),
-            }),
+            manual_src,
             num_rows="dynamic",
             hide_index=True,
             width="stretch",
-            key=f"manual_articles_{run}",
+            disabled=["비고"],
+            key=f"manual_articles_{run}_{fetched_state['n']}",
             column_config={
                 "게재일": st.column_config.DateColumn("게재일", default=dist_date, format="YYYY-MM-DD"),
                 "다음": st.column_config.CheckboxColumn("다음", default=False, width="small"),
                 "구글": st.column_config.CheckboxColumn("구글", default=True, width="small"),
+                "비고": st.column_config.TextColumn("비고", width="medium"),
             },
         )
         manual, skipped = [], 0
