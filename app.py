@@ -133,7 +133,7 @@ with tab1:
 
         st.markdown("##### 기사 확인 및 다음·구글 반영")
         st.caption(
-            "**⚠ 확인** 표시는 제목이 보도자료와 많이 달라 인터뷰·다른 소식일 수 있는 기사입니다(맨 위에 모아둠). "
+            "**⚠ 확인** 표시는 제목이 보도자료와 많이 달라 인터뷰·다른 소식일 수 있는 기사입니다. "
             "보고서에서 뺄 기사는 **포함** 체크를 해제하세요. "
             "다음·구글은 자동 수집이 안 되니 직접 확인한 노출을 체크하면 PDF·엑셀에 바로 반영됩니다."
         )
@@ -146,7 +146,7 @@ with tab1:
             return ""
 
         notes = [_check_note(r) for r in rows]
-        order = sorted(range(len(rows)), key=lambda i: notes[i] == "")  # 확인 필요한 기사를 위로
+        order = range(len(rows))  # 보고서와 같은 순서 (포털 > 매체 영향력)
         flags = st.data_editor(
             pd.DataFrame(
                 [{"포함": True, "확인": notes[i], "매체명": rows[i]["매체명"], "제목": rows[i]["제목"],
