@@ -3,7 +3,8 @@
 월간 PR리포트를 앱 안에서 편집해 PDF로 만드는 흐름의 데이터 처리.
   - 수집한 기사에 첫 형식 넣기 / 보도자료 목록 추정
   - 앱에서 고친 기사·보도자료·미팅·목표 -> PDF용 데이터(monthly_pdf.build_monthly_pdf 입력) 계산
-  - 기록용 엑셀: 기존 PR리포트 파일에 이번 달 시트를 기존과 같은 칸 배치로 추가하고 Summary 시트 갱신
+  - 월별 기록(형식별 1~12월 건수): 지난달 PDF에 숨겨 둔 기록(monthly_pdf.read_history) 또는
+    처음 한 번 기존 PR리포트 엑셀의 Summary 시트에서 읽어 오고, 이번 달 PDF에 다시 숨겨 넣는다
   - 작업 파일(.json) 저장 / 불러오기 (수집한 기사 목록까지 통째로 저장해서 다시 검색하지 않음)
 """
 import io
@@ -12,10 +13,9 @@ from collections import Counter
 from datetime import date, datetime
 
 import openpyxl
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from media_order import media_sort_key
-from monthly_pdf import PLANNED_TYPES, TYPE_ORDER, assign_release, summary_rows, trend_from_rows
+from monthly_pdf import TYPE_ORDER, assign_release, summary_rows, trend_from_rows
 
 WORK_VERSION = 1
 KIND_OPTIONS = TYPE_ORDER  # 앱 '형식' 드롭다운
@@ -56,8 +56,9 @@ def sort_articles(articles):
 
 def compose(meta, articles, releases, meetings, plans, trend_rows):
     """meta: {'company','year','month'} / articles: [{'url','media','title','date','kind','include','group'}]
-    releases: [{'title','date'}] / meetings, plans: [(a,b,c)] / trend_rows: Summary 값 {형식: [12]} 또는 None.
-    반환: (monthly_pdf 용 data, 보도자료 배포일 목록, 형식 미지정 기사 수)"""
+    releases: [{'title','date'}] / meetings, plans: [(a,b,c)] / trend_rows: 월별 기록 {형식: [12]} 또는 None.
+    반환: (monthly_pdf 용 data, 보도자료 배포일 목록, 형식 미지정 기사 수)
+    이번 달 칸은 표에서 센 값으로 덮어쓰고, 그 기록을 data['history'] 로 PDF에 숨겨 넣게 한다."""
     used = [a for a in articles if a["include"] and a["kind"]]
     blank = sum(1 for a in articles if a["include"] and not a["kind"])
     dates = [r["date"] for r in releases]
@@ -83,175 +84,22 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
                          "count": len(members), "first": min(a["date"] or date.max for a in members)})
     mentions.sort(key=lambda m: (-m["count"], m["first"]))
 
-    trend = None
-    if trend_rows:
-        rows = {k: list(v) for k, v in trend_rows.items()}
-        for k in TYPE_ORDER:
-            rows[k][meta["month"] - 1] = types[k]
-        trend = trend_from_rows(rows)
+    m = meta["month"]
+    rows = {k: list((trend_rows or {}).get(k) or [0] * 12) for k in TYPE_ORDER}
+    for k in TYPE_ORDER:
+        rows[k][m - 1] = types[k]
+    has_past = any(rows[k][i] for k in TYPE_ORDER for i in range(m - 1))
+    trend = trend_from_rows(rows) if has_past else None  # 지난 기록이 없으면 추이·전월 비교는 빼고 그림
 
-    nm = meta["month"] % 12 + 1
-    data = {"company": meta["company"], "year": meta["year"], "month": meta["month"], "types": types,
+    data = {"company": meta["company"], "year": meta["year"], "month": m, "types": types,
             "releases": rels, "articles": main, "mentions": mentions,
-            "meetings": [m for m in meetings if any(m)], "plans": [p for p in plans if any(p)],
-            "plan_title": f"{nm}월 PR 목표", "trend": trend}
+            "meetings": [x for x in meetings if any(x)], "plans": [p for p in plans if any(p)],
+            "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend,
+            "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows}}
     return data, dates, blank
 
 
-# ---------------------------------------------------------------- 기록용 엑셀
-
-THIN = Side(style="thin", color="D0D4DB")
-BOX = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-HEAD_FILL = PatternFill("solid", fgColor="E8EEFC")
-TITLE_FONT = Font(name="맑은 고딕", size=16, bold=True)
-SEC_FONT = Font(name="맑은 고딕", size=12, bold=True)
-HEAD_FONT = Font(name="맑은 고딕", size=10, bold=True)
-BODY_FONT = Font(name="맑은 고딕", size=10)
-LINK_FONT = Font(name="맑은 고딕", size=10, color="1F4ED8", underline="single")
-
-
-def _cells(ws, row, spec, head=False):
-    """spec: [(시작열, 끝열, 값)] - 시작~끝 병합, 테두리·글꼴 적용. 값이 ('link', url) 이면 하이퍼링크."""
-    for c1, c2, v in spec:
-        cell = ws.cell(row, c1)
-        if isinstance(v, tuple) and v[0] == "link":
-            cell.value = v[1]
-            if v[1]:
-                cell.hyperlink = v[1]
-            cell.font = LINK_FONT
-        else:
-            cell.value = v
-            cell.font = HEAD_FONT if head else BODY_FONT
-        for c in range(c1, c2 + 1):
-            ws.cell(row, c).border = BOX
-            if head:
-                ws.cell(row, c).fill = HEAD_FILL
-        cell.alignment = Alignment(horizontal="center" if head else "left", vertical="center", wrap_text=not head)
-        if c2 > c1:
-            ws.merge_cells(start_row=row, start_column=c1, end_row=row, end_column=c2)
-
-
-def _write_month_sheet(ws, data, articles_all):
-    """기존 월 시트와 같은 칸 배치(B~K열, '1.'~'6.' 구역)로 이번 달 내용을 쓴다 -> monthly_pdf.read_month_report 로 다시 읽힘."""
-    m = data["month"]
-    ws["B2"] = f"{data['company']} {m}월 PR리포트"
-    ws["B2"].font = TITLE_FONT
-    r = 4
-
-    def section(title):
-        nonlocal r
-        ws.cell(r, 2, title).font = SEC_FONT
-        r += 1
-
-    section("1. 기사형식별 보도 수")
-    _cells(ws, r, [(2, 2, ""), (3, 3, "게재 수")], head=True); r += 1
-    for k in TYPE_ORDER:
-        _cells(ws, r, [(2, 2, k), (3, 3, data["types"][k])]); r += 1
-    _cells(ws, r, [(2, 2, "합계"), (3, 3, sum(data["types"].values()))], head=True); r += 2
-
-    section("2. 보도자료별 게재 현황")
-    _cells(ws, r, [(2, 2, "No."), (3, 5, "주제"), (6, 6, "게재 수")], head=True); r += 1
-    for i, rel in enumerate(data["releases"], 1):
-        _cells(ws, r, [(2, 2, i), (3, 5, rel["title"]), (6, 6, rel["count"])]); r += 1
-    r += 1
-
-    section("3. 주요 기사 리스트")
-    _cells(ws, r, [(2, 2, "No."), (3, 3, "매체"), (4, 6, "제목"), (7, 9, "URL"), (10, 10, "날짜"), (11, 11, "기사형식")], head=True)
-    r += 1
-    for i, a in enumerate(data["articles"], 1):
-        d = a["date"].isoformat() if a["date"] else ""
-        _cells(ws, r, [(2, 2, i), (3, 3, a["media"]), (4, 6, a["title"]), (7, 9, ("link", a["url"])),
-                       (10, 10, d), (11, 11, a["kind"])]); r += 1
-    r += 1
-
-    section("4. 단순 언급 주요 기사")
-    _cells(ws, r, [(2, 2, "No."), (3, 3, "매체"), (4, 6, "제목"), (7, 9, "URL"), (10, 10, "관련 기사 수"), (11, 11, "기사형식")], head=True)
-    r += 1
-    for i, mn in enumerate(data["mentions"], 1):
-        _cells(ws, r, [(2, 2, i), (3, 3, mn["media"]), (4, 6, mn["title"]), (7, 9, ("link", mn["url"])),
-                       (10, 10, f"{mn['count']}건"), (11, 11, "")]); r += 1
-    r += 1
-
-    section("5. 기자 미팅 리스트")
-    _cells(ws, r, [(2, 2, "매체"), (3, 3, "기자명"), (4, 11, "주요 내용")], head=True); r += 1
-    for a, b, c in data["meetings"]:
-        _cells(ws, r, [(2, 2, a), (3, 3, b), (4, 11, c)]); r += 1
-    r += 1
-
-    section(f"6. {data['plan_title']}")
-    _cells(ws, r, [(2, 2, "기사형식"), (3, 4, "내용"), (5, 6, "진행 상황")], head=True); r += 1
-    for a, b, c in data["plans"]:
-        _cells(ws, r, [(2, 2, a), (3, 4, b), (5, 6, c)]); r += 1
-    r += 1
-
-    # 단순 언급 기사 원본 목록 (기록용 - PDF에는 묶음만 나감)
-    mention_arts = [a for a in sort_articles(articles_all) if a["include"] and a["kind"] == "단순언급"]
-    if mention_arts:
-        ws.cell(r, 2, "참고. 단순 언급 기사 전체").font = SEC_FONT
-        r += 1
-        _cells(ws, r, [(2, 2, "No."), (3, 3, "매체"), (4, 6, "제목"), (7, 9, "URL"), (10, 10, "날짜"), (11, 11, "묶음")], head=True)
-        r += 1
-        for i, a in enumerate(mention_arts, 1):
-            _cells(ws, r, [(2, 2, i), (3, 3, a["media"]), (4, 6, a["title"]), (7, 9, ("link", a["url"])),
-                           (10, 10, a["date"].isoformat() if a["date"] else ""), (11, 11, a.get("group") or "")]); r += 1
-
-    ws.column_dimensions["A"].width = 3
-    ws.column_dimensions["B"].width = 16
-    for col in "CDEFGHIJK":
-        ws.column_dimensions[col].width = 16
-    ws.sheet_view.showGridLines = False
-
-
-def _update_summary(wb, data):
-    sm_name = next((n for n in wb.sheetnames if n.lower().startswith("summary")), None)
-    if sm_name is None:
-        sm = wb.create_sheet(f"Summary ({data['year']})", 0)
-        sm["B2"] = f"{data['year']}년 월별 커버리지"
-        sm["B2"].font = SEC_FONT
-        _cells(sm, 3, [(2, 2, "")] + [(3 + i, 3 + i, f"{i + 1}월") for i in range(12)] + [(15, 15, "합계"), (16, 16, "비율")], head=True)
-        for j, k in enumerate(TYPE_ORDER + ["합계"]):
-            row = 4 + j
-            _cells(sm, row, [(2, 2, k)] + [(3 + i, 3 + i, 0) for i in range(12)], head=(k == "합계"))
-            _cells(sm, row, [(15, 15, f"=SUM(C{row}:N{row})"), (16, 16, f"=IFERROR(O{row}/O10,0)")], head=(k == "합계"))
-            if k == "합계":
-                for i in range(12):
-                    col = openpyxl.utils.get_column_letter(3 + i)
-                    sm.cell(row, 3 + i).value = f"=SUM({col}4:{col}9)"
-        sm.column_dimensions["B"].width = 16
-        return
-    sm = wb[sm_name]
-    col = 2 + data["month"]
-    for r in range(1, sm.max_row + 1):
-        name = str(sm.cell(r, 2).value or "").strip()
-        cell = sm.cell(r, col)
-        if name in data["types"]:
-            cell.value = data["types"][name]
-        elif name == "합계" and not str(cell.value or "").startswith("="):
-            cell.value = sum(data["types"].values())
-
-
-def build_record_xlsx(base_bytes, data, articles_all):
-    """base_bytes: 기존 PR리포트 엑셀(없으면 새 파일). 이번 달 시트를 Summary 바로 뒤에 넣고(같은 이름은 교체) Summary 갱신."""
-    if base_bytes:
-        wb = openpyxl.load_workbook(io.BytesIO(base_bytes))
-    else:
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)
-    name = f"{data['month']}월"
-    if name in wb.sheetnames:
-        idx = wb.sheetnames.index(name)
-        del wb[name]
-    else:
-        sm = next((i for i, n in enumerate(wb.sheetnames) if n.lower().startswith("summary")), None)
-        idx = 0 if sm is None else sm + 1
-    ws = wb.create_sheet(name, idx)
-    _write_month_sheet(ws, data, articles_all)
-    _update_summary(wb, data)
-    wb.active = wb.sheetnames.index(name)
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
+# ---------------------------------------------------------------- 월별 기록 불러오기
 
 def trend_rows_from_xlsx(base_bytes):
     """기존 PR리포트 엑셀의 Summary 값 {형식: [12]} 과 연도. 없으면 (None, None)."""

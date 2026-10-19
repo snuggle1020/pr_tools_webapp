@@ -8,7 +8,9 @@
 월 시트는 B열의 '1. 기사형식별 보도 수' 같은 구역 제목을 기준으로 읽는다.
 그리기 도구(폰트·줄바꿈·좌표 래퍼)는 결과보고서(report_pdf)의 것을 그대로 쓴다.
 """
+import base64
 import io
+import json
 import re
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -560,13 +562,36 @@ def _draw_mentions(doc):
                size=8.3, color=MUTED)
 
 
+HISTORY_PREFIX = "prhist:"
+
+
+def read_history(pdf_bytes):
+    """앱이 만든 월간 리포트 PDF에 숨겨 둔 월별 기록. 반환: {'company','year','month','rows': {형식: [12]}} 또는 None."""
+    try:
+        from pypdf import PdfReader
+        kw = (PdfReader(io.BytesIO(pdf_bytes)).metadata or {}).get("/Keywords") or ""
+        if not kw.startswith(HISTORY_PREFIX):
+            return None
+        h = json.loads(base64.b64decode(kw[len(HISTORY_PREFIX):]).decode("utf-8"))
+        h["rows"] = {k: [int(x) for x in h["rows"].get(k, [0] * 12)] for k in TYPE_ORDER}
+        h["year"], h["month"] = int(h["year"]), int(h["month"])
+        return h
+    except Exception:
+        return None
+
+
 def build_monthly_pdf(data, release_dates, summary_text=""):
-    """data: read_month_report() 결과, release_dates: 보도자료 순서대로 배포일(date). 반환값: PDF bytes."""
+    """data: read_month_report() / monthly_report.compose() 결과, release_dates: 보도자료 순서대로 배포일(date).
+    data['history'] 가 있으면 다음 달에 이 PDF만 올려도 월별 추이가 이어지도록 PDF 정보(키워드)에 숨겨 넣는다.
+    반환값: PDF bytes."""
     _register_fonts()
     buf = io.BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=A4)
     c.setTitle(f"{data['company']} {data['year']}년 {data['month']}월 PR 리포트")
     c.setAuthor("오픈피알")
+    if data.get("history"):
+        raw = json.dumps(data["history"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        c.setKeywords(HISTORY_PREFIX + base64.b64encode(raw).decode("ascii"))
     doc = _Doc(c, data)
 
     doc.header()

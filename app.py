@@ -2,7 +2,7 @@
 """
 PR 리포트 도구 웹앱.
 - 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 + PDF 보고서 생성)
-- 탭2: 월간 PR리포트 (한 달 기사 수집·자동분류 -> 앱에서 확인·수정 -> PDF + 기록용 엑셀, 완성된 엑셀 -> PDF)
+- 탭2: 월간 PR리포트 (한 달 기사 수집·자동분류 -> 앱에서 확인·수정 -> PDF, 월별 기록은 PDF에 숨겨 다음 달로 이어감)
 
 네이버 API 키는 Streamlit Cloud의 App settings > Secrets 에
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
@@ -27,11 +27,9 @@ from article_meta import fetch_article_meta, normalize_url
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
-from monthly_pdf import (
-    assign_release, build_monthly_pdf, default_summary, guess_release_dates, month_sheets, read_month_report,
-)
+from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf, default_summary, read_history
 from monthly_report import (
-    KIND_OPTIONS, build_record_xlsx, compose, guess_releases, initial_kind, sort_articles, trend_rows_from_xlsx,
+    KIND_OPTIONS, compose, guess_releases, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
 
@@ -378,13 +376,14 @@ with tab2:
                 "plans": w["plans"], "summary": w["summary"], "trend_rows": w["trend_rows"],
             }
             st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
+            st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
 
-    m_base = st.file_uploader(
-        "지금까지의 PR리포트 엑셀 (선택) · 월별 추이·전월 비교에 쓰고, 이번 달 시트를 추가해 기록용 파일로 돌려드립니다",
-        type=["xlsx"],
-        key="m_base",
+    m_prev = st.file_uploader(
+        "지난달 PDF 리포트 (월별 추이·전월 비교용) · 이 앱으로 만든 PDF에는 월별 건수가 들어 있어서 올리기만 하면 이어집니다. "
+        "처음 한 번은 기존 PR리포트 엑셀을 올려도 됩니다",
+        type=["pdf", "xlsx"],
+        key="m_prev",
     )
-    m_base_bytes = m_base.getvalue() if m_base is not None else None
 
     _last_month = date.today().replace(day=1) - timedelta(days=1)
     with st.form("monthly_form"):
@@ -436,18 +435,40 @@ with tab2:
                     "summary": None, "trend_rows": None,
                 }
                 st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
+                st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
 
     M = st.session_state.get("monthly")
     if M:
         run = st.session_state["m_run"]
-        if m_base_bytes:
-            _, base_rows = trend_rows_from_xlsx(m_base_bytes)
-            if base_rows:
-                M["trend_rows"] = base_rows
-        st.success(
-            f"{M['company']} {M['year']}년 {M['month']}월 · 기사 {len(M['articles'])}건"
-            + ("" if M["trend_rows"] else " · 월별 추이·전월 비교는 PR리포트 엑셀을 올리면 함께 나옵니다")
-        )
+        # 지난달 PDF(숨은 월별 기록) 또는 처음 한 번 PR리포트 엑셀(Summary)로 월별 건수 채우기 - 수집·불러오기마다 한 번
+        prev_key = (m_prev.file_id, st.session_state.get("m_cid", 0)) if m_prev is not None else None
+        if prev_key and st.session_state.get("m_prev_applied") != prev_key:
+            st.session_state["m_prev_applied"] = prev_key
+            raw = m_prev.getvalue()
+            if m_prev.name.lower().endswith(".pdf"):
+                h = read_history(raw)
+                year, rows = (h["year"], h["rows"]) if h else (None, None)
+                if not h:
+                    msg = ("warning", "이 PDF에는 월별 기록이 없습니다 (이 앱으로 만든 PDF가 아님). "
+                                      "아래 ④ 월별 건수 표에 직접 넣거나 기존 PR리포트 엑셀을 한 번 올려주세요.")
+            else:
+                year, rows = trend_rows_from_xlsx(raw)
+                if not rows:
+                    msg = ("warning", "엑셀에서 Summary 시트(월별 커버리지)를 찾지 못했습니다.")
+            if rows:
+                if year not in (None, M["year"]):
+                    msg = ("warning", f"올린 파일은 {year}년 기록이라 {M['year']}년 리포트에는 쓰지 않았습니다.")
+                else:
+                    M["trend_rows"] = rows
+                    st.session_state["m_hist_ver"] = st.session_state.get("m_hist_ver", 0) + 1
+                    msg = ("info", f"'{m_prev.name}'에서 월별 건수를 불러왔습니다. 아래 ④ 표에서 확인할 수 있습니다.")
+            st.session_state["m_prev_msg"] = msg
+        if m_prev is None:
+            st.session_state.pop("m_prev_msg", None)
+        kind_, text_ = st.session_state.get("m_prev_msg", (None, None))
+        if kind_:
+            getattr(st, kind_)(text_)
+        st.success(f"{M['company']} {M['year']}년 {M['month']}월 · 기사 {len(M['articles'])}건")
         company_name = st.text_input("PDF에 표시할 고객사명", value=M["company"], key=f"m_company_{run}")
 
         # ① 보도자료
@@ -536,11 +557,35 @@ with tab2:
 
         meetings, plans = _rows(meet_df), _rows(plan_df)
 
-        meta = {"company": company_name.strip() or M["company"], "year": M["year"], "month": M["month"]}
-        mdata, rel_dates, n_blank = compose(meta, articles, releases, meetings, plans, M["trend_rows"])
+        # ④ 월별 건수 (지난달까지) - 지난달 PDF/엑셀에서 불러온 값, 직접 고칠 수 있음. 이번 달은 기사 표에서 셈
+        st.markdown("##### ④ 월별 건수 (월별 추이·전월 비교)")
+        hist_rows = {k: list((M["trend_rows"] or {}).get(k) or [0] * 12) for k in TYPE_ORDER}
+        if M["month"] > 1:
+            with st.expander(
+                f"1~{M['month'] - 1}월 형식별 건수 보기·고치기"
+                + ("" if M["trend_rows"] else " · 지난달 PDF를 올리거나 여기에 직접 넣으면 PDF에 추이·전월 비교가 나옵니다"),
+                expanded=not M["trend_rows"],
+            ):
+                hist_df = st.data_editor(
+                    pd.DataFrame([{"월": f"{i + 1}월", **{k: int(hist_rows[k][i]) for k in TYPE_ORDER}}
+                                  for i in range(M["month"] - 1)]),
+                    hide_index=True, width="stretch", disabled=["월"],
+                    key=f"m_hist_{run}_{st.session_state.get('m_hist_ver', 0)}",
+                    column_config={k: st.column_config.NumberColumn(k, min_value=0, step=1) for k in TYPE_ORDER},
+                )
+                st.caption(f"{M['month']}월 숫자는 위 기사 표에서 자동으로 셉니다. "
+                           "이 숫자들은 PDF에 함께 저장돼서, 다음 달엔 이번 PDF만 올리면 이어집니다.")
+            for i, (_, r) in enumerate(hist_df.iterrows()):
+                for k in TYPE_ORDER:
+                    hist_rows[k][i] = 0 if pd.isna(r[k]) else int(r[k])
+        has_hist = any(hist_rows[k][i] for k in TYPE_ORDER for i in range(M["month"] - 1))
+        trend_input = hist_rows if has_hist else None
 
-        # ④ 요약
-        st.markdown("##### ④ 이달의 요약")
+        meta = {"company": company_name.strip() or M["company"], "year": M["year"], "month": M["month"]}
+        mdata, rel_dates, n_blank = compose(meta, articles, releases, meetings, plans, trend_input)
+
+        # ⑤ 요약
+        st.markdown("##### ⑤ 이달의 요약")
         summary_text = st.text_area(
             "PDF 1쪽에 들어갑니다 (비우면 빠짐)",
             value=M["summary"] if M["summary"] is not None else default_summary(mdata),
@@ -562,7 +607,7 @@ with tab2:
                                 "date": pub, "kind": "", "include": True, "group": ""})
                     have.add(normalize_url(u))
             M.update(articles=sort_articles(articles + new), releases=releases, meetings=meetings, plans=plans,
-                     summary=summary_text, company=meta["company"])
+                     summary=summary_text, company=meta["company"], trend_rows=trend_input)
             st.session_state["m_run"] = run + 1
             st.rerun()
 
@@ -588,77 +633,19 @@ with tab2:
         except Exception as e:
             st.error(f"PDF를 만들지 못했습니다: {e}")
             m_pdf = None
-        m_xlsx = build_record_xlsx(m_base_bytes, mdata, articles)
         fname = f"{M['year']}년_{M['month']}월_{meta['company']}_PR리포트"
-        b1, b2, b3 = st.columns(3)
+        b1, b2 = st.columns(2)
         if m_pdf:
             b1.download_button("📑 PDF 리포트 다운로드", data=m_pdf, file_name=f"{fname}.pdf", mime="application/pdf",
-                               type="primary", width="stretch", on_click="ignore", key="m_dl_pdf")
+                               type="primary", width="stretch", on_click="ignore", key="m_dl_pdf",
+                               help="다음 달에 이 PDF를 '지난달 PDF 리포트'에 올리면 월별 추이·전월 비교가 이어집니다.")
         b2.download_button(
-            "⬇️ 기록용 엑셀", data=m_xlsx, file_name=f"{fname}_{date.today():%Y%m%d}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch",
-            on_click="ignore", key="m_dl_xlsx",
-            help="올린 PR리포트 엑셀에 이번 달 시트를 추가하고 Summary를 갱신한 파일입니다. 다음 달에 이 파일을 올리면 추이가 이어집니다.",
-        )
-        b3.download_button(
-            "💾 작업 저장",
-            data=dump_month_work(meta, articles, releases, meetings, plans, summary_text, M["trend_rows"]),
+            "💾 작업 저장 (중간 저장용)",
+            data=dump_month_work(meta, articles, releases, meetings, plans, summary_text, trend_input),
             file_name=f"월간작업_{meta['company']}_{M['year']}{M['month']:02d}.json", mime="application/json",
             width="stretch", on_click="ignore", key="m_dl_work",
-            help="이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
+            help="작업을 나중에 이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
         )
-
-    # --- 예전 방식: 손으로 다 채운 엑셀 -> PDF ---
-    with st.expander("📄 완성된 PR리포트 엑셀로 PDF 만들기 (지난달 리포트를 다시 뽑을 때)"):
-        report_file = st.file_uploader("완성된 PR리포트 파일 업로드", type=["xlsx"], key="mpdf_file")
-        if report_file is not None:
-            try:
-                mpdf_sheets = month_sheets(report_file)
-            except Exception as e:
-                st.error(f"워크북을 열 수 없습니다: {e}")
-                mpdf_sheets = []
-            if not mpdf_sheets:
-                st.error("'8월'처럼 'N월' 이름의 시트를 찾지 못했습니다.")
-            else:
-                mpdf_sheet = st.selectbox("PDF로 만들 달", mpdf_sheets, index=0, key="mpdf_sheet")
-                try:
-                    xdata = read_month_report(report_file, mpdf_sheet)
-                except Exception as e:
-                    st.error(f"'{mpdf_sheet}' 시트를 읽지 못했습니다: {e}")
-                    xdata = None
-
-                if xdata is not None:
-                    st.caption(
-                        f"{xdata['company']} · 총 {sum(xdata['types'].values())}건 · "
-                        f"보도자료 {len(xdata['releases'])}건 · 주요 기사 {len(xdata['articles'])}건 · "
-                        f"단순 언급 주제 {len(xdata['mentions'])}개"
-                    )
-                    x_dates = []
-                    if xdata["releases"]:
-                        st.markdown("**보도자료 배포일** · 기사 목록을 보도자료별로 묶는 데 씁니다 (기사가 몰린 날짜로 미리 채움)")
-                        for i, (rel, d0) in enumerate(zip(xdata["releases"], guess_release_dates(xdata))):
-                            x_dates.append(st.date_input(
-                                f"{i + 1}. {rel['title']} ({rel['count']}건)", value=d0,
-                                key=f"mpdf_date_{mpdf_sheet}_{i}",
-                            ))
-                    x_summary = st.text_area(
-                        "이달의 요약 (PDF 1쪽에 들어갑니다. 비우면 빠짐)",
-                        value=default_summary(xdata), height=110, key=f"mpdf_summary_{mpdf_sheet}",
-                    )
-                    try:
-                        x_pdf = build_monthly_pdf(xdata, x_dates, x_summary)
-                    except Exception as e:
-                        st.error(f"PDF를 만들지 못했습니다: {e}")
-                        x_pdf = None
-                    if x_pdf:
-                        st.download_button(
-                            "⬇️ 월간 리포트 PDF 다운로드",
-                            data=x_pdf,
-                            file_name=f"{xdata['year']}년_{xdata['month']}월_{xdata['company']}_PR리포트.pdf",
-                            mime="application/pdf",
-                            key="mpdf_download",
-                            on_click="ignore",
-                        )
 
 # ------------------------------------------------------------------
 # 탭 3: 네이버 기사 수집
