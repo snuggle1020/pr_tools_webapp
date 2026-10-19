@@ -17,7 +17,8 @@ import streamlit as st
 
 from naver_news import collect_coverage
 from report_sheet import (
-    EXTRA_PORTALS, apply_manual_portals, build_sheet, derive_company, derive_keyword, resolve_coverage,
+    EXTRA_PORTALS, LOW_RELEVANCE, apply_manual_portals, build_sheet, derive_company, derive_keyword,
+    resolve_coverage, title_relevance,
 )
 from report_pdf import build_pdf
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
@@ -130,31 +131,48 @@ with tab1:
                 + " — 직접 확인해서 domain_to_media.json에 추가해주세요."
             )
 
-        st.markdown("##### 다음·구글 게재 반영 (선택)")
+        st.markdown("##### 기사 확인 및 다음·구글 반영")
         st.caption(
-            "다음·구글은 자동 수집이 안 됩니다. 직접 확인한 내용을 아래에 체크·입력하면 "
-            "PDF와 엑셀의 '게재 포털'과 집계에 바로 반영됩니다."
+            "**⚠ 확인** 표시는 제목이 보도자료와 많이 달라 인터뷰·다른 소식일 수 있는 기사입니다(맨 위에 모아둠). "
+            "보고서에서 뺄 기사는 **포함** 체크를 해제하세요. "
+            "다음·구글은 자동 수집이 안 되니 직접 확인한 노출을 체크하면 PDF·엑셀에 바로 반영됩니다."
         )
 
+        def _check_note(r):
+            if title_relevance(title, company, r["제목"]) < LOW_RELEVANCE:
+                return "⚠ 제목이 보도자료와 다름"
+            if r["제목"].startswith("[확인필요]"):
+                return "⚠ 본문 확인 필요"
+            return ""
+
+        notes = [_check_note(r) for r in rows]
+        order = sorted(range(len(rows)), key=lambda i: notes[i] == "")  # 확인 필요한 기사를 위로
         flags = st.data_editor(
             pd.DataFrame(
-                [{"매체명": r["매체명"], "제목": r["제목"], "게재일": r["게재일자"].date(),
-                  "다음": False, "구글": False} for r in rows],
-                columns=["매체명", "제목", "게재일", "다음", "구글"],
+                [{"포함": True, "확인": notes[i], "매체명": rows[i]["매체명"], "제목": rows[i]["제목"],
+                  "게재일": rows[i]["게재일자"].date(), "다음": False, "구글": False} for i in order],
+                columns=["포함", "확인", "매체명", "제목", "게재일", "다음", "구글"],
             ),
-            disabled=["매체명", "제목", "게재일"],
+            disabled=["확인", "매체명", "제목", "게재일"],
             hide_index=True,
             width="stretch",
             key=f"portal_flags_{run}",
             column_config={
+                "포함": st.column_config.CheckboxColumn("포함", width="small"),
+                "확인": st.column_config.TextColumn("확인", width="medium"),
                 "다음": st.column_config.CheckboxColumn("다음에도 노출", width="small"),
                 "구글": st.column_config.CheckboxColumn("구글에도 노출", width="small"),
             },
         )
-        extra = {
-            rows[i]["URL"]: {p for p in EXTRA_PORTALS if bool(flags.iloc[i][p])}
-            for i in range(len(rows))
-        }
+        included, extra = [], {}
+        for pos, i in enumerate(order):
+            if not bool(flags.iloc[pos]["포함"]):
+                continue
+            included.append(rows[i])
+            extra[rows[i]["URL"]] = {p for p in EXTRA_PORTALS if bool(flags.iloc[pos][p])}
+        n_excluded = len(rows) - len(included)
+        if n_excluded:
+            st.caption(f"포함 해제: {n_excluded}건은 PDF·엑셀에서 빠집니다.")
 
         st.caption("네이버에는 없고 다음·구글에서만 찾은 기사는 아래 표에 행을 추가해서 입력하세요.")
         manual_df = st.data_editor(
@@ -196,7 +214,7 @@ with tab1:
         if skipped:
             st.warning(f"매체명·제목·URL·포털(다음/구글) 중 빈 칸이 있는 {skipped}개 행은 보고서에서 빠졌습니다.")
 
-        final_rows = apply_manual_portals(rows, extra, manual)
+        final_rows = apply_manual_portals(included, extra, manual)
 
         if report["existing"] is not None:
             wb = openpyxl.load_workbook(io.BytesIO(report["existing"]))
