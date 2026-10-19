@@ -579,8 +579,9 @@ with tab2:
         no_release = sum(1 for a in articles if a["include"] and a["kind"] == "보도자료"
                          and assign_release(a, rel_dates) is None)
         if no_release:
-            st.warning(f"형식이 보도자료인데 배포일 이전 기사라 어느 보도자료에도 묶이지 않은 기사 {no_release}건이 있습니다 "
-                       "(PDF에서 '기획·기타'로 나갑니다). ① 보도자료 배포일을 확인하세요.")
+            why = "① 보도자료 목록이 비어 있어" if not releases else "배포일보다 먼저 실린 기사라"
+            st.warning(f"형식이 보도자료인데 {why} 어느 보도자료에도 묶이지 않은 기사 {no_release}건이 있습니다 "
+                       "(PDF에서 '기획·기타'로 나갑니다). 보도자료 목록이나 기사 형식을 확인하세요.")
 
         try:
             m_pdf = build_monthly_pdf(mdata, rel_dates, summary_text)
