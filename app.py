@@ -23,7 +23,7 @@ from report_sheet import (
     load_domain_map, resolve_coverage, title_relevance,
 )
 from report_pdf import build_pdf
-from article_meta import fetch_article_meta, normalize_url
+from article_meta import complete_truncated_titles, fetch_article_meta, normalize_url
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
@@ -129,6 +129,8 @@ with tab1:
             if coverage is not None:
                 with st.spinner("고정 목록에 없는 매체는 기사 페이지에서 매체명 자동 인식 중..."):
                     rows, unmapped, auto_detected = resolve_coverage(coverage)
+                with st.spinner("네이버에서 잘려서 온 기사 제목을 원문에서 확인 중..."):
+                    complete_truncated_titles(rows)
                 # 다음·구글 수동 입력으로 화면이 다시 그려져도(rerun) 결과가 유지되도록 세션에 보관
                 st.session_state["report"] = {
                     "title": title,

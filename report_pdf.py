@@ -117,7 +117,7 @@ def _wrap(text, font, size, width):
 
 
 def _clip_lines(lines, font, size, width, max_lines):
-    """줄 수를 max_lines 로 자르고, 잘렸으면 마지막 줄 끝에 … 를 붙인다."""
+    """줄 수를 max_lines 로 자르고, 잘렸으면 마지막 줄 끝에 … 를 붙인다. (월간 PR리포트 PDF에서 사용)"""
     if len(lines) <= max_lines:
         return lines
     last = lines[max_lines - 1]
@@ -318,12 +318,13 @@ def _draw_summary_card(p, top, arts, kpis):
     return top + h
 
 
-def _draw_featured(p, top, arts, limit):
+def _draw_featured(p, top, arts, limit, dry_run=False):
     """주요 매체 게재 기사 FEATURED_COUNT(4)건 선정:
     표와 같은 순서(네이버 CP > 네이버 검색제휴 > 다음 > 구글, 같은 포털 안에서는 매체 영향력 순)로
     위에서부터 한 매체당 1건씩 고르고, 매체가 모자라면 같은 매체의 다른 기사로 채운다.
     기사가 4건 미만이면 있는 만큼, 0건이면 이 칸을 그리지 않는다.
-    카드 제목은 최대 2줄(넘치면 …)로 잘라 4건이 항상 1쪽에 들어가게 한다.
+    카드 제목은 자르지 않고 전체를 보여주고, 1쪽에 4건이 안 들어가면 제목 글자만 조금 작게 한다.
+    dry_run=True 이면 그리지 않고 limit 안에 전부 들어가는지(True/False)만 돌려준다.
     limit: 이 높이(top 좌표)를 넘기지 않는 카드 줄까지만 그림 (1쪽 넘침 방지 안전장치)."""
     picks, seen = [], set()
     for a in arts:  # arts 는 이미 표 순서로 정렬돼 있음 (_prepare)
@@ -336,21 +337,25 @@ def _draw_featured(p, top, arts, limit):
     gap = 10
     cw = (W - gap) / 2
 
-    def layout(max_lines):
+    def layout(size, lead):
         rows, used = [], top + 22 + 40
         for i in range(0, len(picks), 2):
             pair = picks[i:i + 2]
-            wrapped = [_clip_lines(_wrap(a["title"], MED, 9.8, cw - 30), MED, 9.8, cw - 30, max_lines) for a in pair]
-            h = 40 + 15 * max(len(w) for w in wrapped)
+            wrapped = [_wrap(a["title"], MED, size, cw - 30) for a in pair]
+            h = 40 + lead * max(len(w) for w in wrapped)
             if used + h > limit:
                 break
             rows.append((pair, wrapped, h))
             used += h + 8
         return rows
 
-    card_rows = layout(2)
-    if sum(len(pair) for pair, _, _ in card_rows) < len(picks):
-        card_rows = layout(1)  # 공간이 빠듯하면 제목을 1줄로 줄여 4건을 모두 넣음
+    for size, lead in ((9.8, 15), (8.8, 13), (8, 11.5)):  # 공간이 빠듯하면 제목 글자를 줄여 4건을 모두 넣음
+        card_rows = layout(size, lead)
+        fits = sum(len(pair) for pair, _, _ in card_rows) == len(picks)
+        if fits:
+            break
+    if dry_run:
+        return fits
     if not card_rows:
         return top
 
@@ -368,8 +373,8 @@ def _draw_featured(p, top, arts, limit):
             p.text(x + 15, top + 15, a["media"], font=BOLD, size=9.3, color=BLUE)
             lt = top + 34
             for line in lines:
-                p.text(x + 15, lt, line, font=MED, size=9.8)
-                lt += 15
+                p.text(x + 15, lt, line, font=MED, size=size)
+                lt += lead
             p.link(a["url"], x, top, cw, h)
         top += h + 8
     return top
@@ -559,21 +564,30 @@ def build_pdf(title, company, distribution_date, rows, window_days=3, generated_
 
     top = _draw_header(p, company, title, dist_dt, max(last, dist_dt))
     top = _draw_summary_card(p, top, arts, kpis)
-    top = _draw_featured(p, top, arts, limit=PAGE_H - 28 - _bar_cards_height(arts))  # 1쪽은 꼬리말이 없어 여백을 좁게
-    top = _draw_bar_cards(p, top, arts)
+    page_bottom = PAGE_H - 28  # 1쪽은 꼬리말이 없어 여백을 좁게
+    # 주요 매체 기사 4건(전체 제목)과 막대 카드가 1쪽에 같이 안 들어가면 막대 카드를 2쪽 맨 위로 넘김
+    bars_on_page1 = _draw_featured(p, top, arts, limit=page_bottom - _bar_cards_height(arts), dry_run=True)
+    if bars_on_page1:
+        top = _draw_featured(p, top, arts, limit=page_bottom - _bar_cards_height(arts))
+        _draw_bar_cards(p, top, arts)
+    else:
+        _draw_featured(p, top, arts, limit=page_bottom)
 
     remaining = _table_rows(arts)
     first = True
     while True:
         c.showPage()
+        table_top = TOP
+        if first and not bars_on_page1:
+            table_top = _draw_bar_cards(p, TOP - 16, arts) + 14
         if not remaining:
             if first:
-                p.rect(X0, TOP, W, 80, fill=WHITE, stroke=LINE, r=10)
-                p.text(X0 + 15, TOP + 18, "게재 기사 전체", font=BOLD, size=13.5)
-                p.text(X0 + 15, TOP + 46, "집계 기간 내 수집된 기사가 없습니다.", color=MUTED)
-                end = TOP + 80
+                p.rect(X0, table_top, W, 80, fill=WHITE, stroke=LINE, r=10)
+                p.text(X0 + 15, table_top + 18, "게재 기사 전체", font=BOLD, size=13.5)
+                p.text(X0 + 15, table_top + 46, "집계 기간 내 수집된 기사가 없습니다.", color=MUTED)
+                end = table_top + 80
             break
-        end, remaining = _draw_table_page(p, TOP, remaining, first)
+        end, remaining = _draw_table_page(p, table_top, remaining, first)
         first = False
         if not remaining:
             break

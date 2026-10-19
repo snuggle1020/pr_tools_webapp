@@ -112,3 +112,24 @@ def fetch_article_meta(url, domain_map=None):
         if not pub:
             note.append("게재일 못 찾음")
     return {"URL": url.strip(), "매체명": media, "제목": title, "게재일자": pub, "note": ", ".join(note)}
+
+
+def _plain(text):
+    return re.sub(r"[^0-9a-z가-힣]", "", (text or "").lower())
+
+
+def complete_truncated_titles(rows, domain_map=None):
+    """네이버 검색 API는 긴 제목을 '...'로 잘라서 준다. 끝이 잘린 제목은 기사 원문에서 전체 제목을 읽어 바꾼다.
+    원문 제목이 잘린 제목으로 시작할 때만 바꿔서 엉뚱한 제목으로 덮어쓰지 않는다. 바꾼 건수 반환."""
+    domain_map = domain_map if domain_map is not None else load_domain_map()
+    fixed = 0
+    for r in rows:
+        title = r["제목"].rstrip()
+        if not title.endswith(("...", "…")):
+            continue
+        head = _plain(title.rstrip(".…"))
+        full = fetch_article_meta(r["URL"], domain_map)["제목"]
+        if full and len(_plain(full)) > len(head) and _plain(full).startswith(head):
+            r["제목"] = full
+            fixed += 1
+    return fixed
