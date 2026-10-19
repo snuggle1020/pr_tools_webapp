@@ -23,6 +23,7 @@ from report_sheet import (
 )
 from report_pdf import build_pdf
 from article_meta import fetch_article_meta, normalize_url
+from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
 from daily_collect_sheet import build_daily_sheet
 
@@ -66,9 +67,34 @@ with tab1:
         f"배포일 당일부터 {REPORT_WINDOW_DAYS}일 뒤까지 게재된 기사만 모읍니다."
     )
 
+    work_file = st.file_uploader(
+        "이전 작업 불러오기 (아래 '💾 작업 저장'으로 받아둔 .json 파일을 올리면 이어서 작업할 수 있습니다)",
+        type=["json"],
+        key="work_file",
+    )
+    if work_file is not None and st.session_state.get("work_file_id") != work_file.file_id:
+        try:
+            saved_work = load_work(work_file.getvalue())
+        except ValueError as e:
+            st.error(str(e))
+        else:
+            st.session_state["work_file_id"] = work_file.file_id
+            st.session_state["saved_work"] = saved_work
+            st.session_state["report_title_input"] = saved_work["title"]
+            st.session_state["report_date_input"] = saved_work["distribution_date"]
+    if work_file is None and st.session_state.pop("work_file_id", None):  # 올렸던 파일을 뺐으면 불러온 작업도 해제
+        st.session_state.pop("saved_work", None)
+    if st.session_state.get("saved_work"):
+        st.caption(
+            "불러온 작업이 아래에 채워졌습니다. **리포트 생성**을 누르면 네이버를 다시 검색하고, "
+            "저장해 둔 포함 해제·다음·구글 노출·직접 추가한 기사를 그대로 적용합니다."
+        )
+
+    st.session_state.setdefault("report_date_input", date.today())
     with st.form("report_form"):
-        title = st.text_input("보도자료 제목", placeholder="예: 딥파인, 국방·산업 현장용 스마트글래스 기반 AI 에이전트 개발 나선다")
-        distribution_date = st.date_input("배포일", value=date.today())
+        title = st.text_input("보도자료 제목", key="report_title_input",
+                              placeholder="예: 딥파인, 국방·산업 현장용 스마트글래스 기반 AI 에이전트 개발 나선다")
+        distribution_date = st.date_input("배포일", key="report_date_input")
         existing_file = st.file_uploader(
             "기존 결과보고서 파일 (파일을 추가하면 맨 왼쪽에 새 시트를 추가합니다 / 없으면 새 파일을 생성합니다)",
             type=["xlsx"],
@@ -108,7 +134,13 @@ with tab1:
                     "auto_detected": auto_detected,
                     "existing": existing_file.getvalue() if existing_file is not None else None,
                 }
-                st.session_state["report_run"] = st.session_state.get("report_run", 0) + 1
+                run = st.session_state.get("report_run", 0) + 1
+                st.session_state["report_run"] = run
+                saved_work = st.session_state.get("saved_work")
+                if saved_work and saved_work["title"] == title:
+                    excluded, portals, manual_saved = restore_choices(saved_work, rows)
+                    st.session_state["report"]["restore"] = {"excluded": excluded, "portals": portals}
+                    st.session_state[f"fetched_{run}"] = {"matched": {}, "fetched": manual_saved, "n": 0}
 
     report = st.session_state.get("report")
     if report:
@@ -148,11 +180,16 @@ with tab1:
             return ""
 
         notes = [_check_note(r) for r in rows]
+        restore = report.get("restore") or {"excluded": set(), "portals": {}}
+        if report.get("restore"):
+            st.info("작업 파일의 선택(포함 해제·다음·구글 노출·직접 추가한 기사)을 적용했습니다. 새로 검색된 기사는 그대로 추가됐습니다.")
         order = range(len(rows))  # 보고서와 같은 순서 (포털 > 매체 영향력)
         flags = st.data_editor(
             pd.DataFrame(
-                [{"포함": True, "확인": notes[i], "매체명": rows[i]["매체명"], "제목": rows[i]["제목"],
-                  "게재일": rows[i]["게재일자"].date(), "다음": False, "구글": False} for i in order],
+                [{"포함": rows[i]["URL"] not in restore["excluded"], "확인": notes[i],
+                  "매체명": rows[i]["매체명"], "제목": rows[i]["제목"], "게재일": rows[i]["게재일자"].date(),
+                  "다음": "다음" in restore["portals"].get(rows[i]["URL"], ()),
+                  "구글": "구글" in restore["portals"].get(rows[i]["URL"], ())} for i in order],
                 columns=["포함", "확인", "매체명", "제목", "게재일", "다음", "구글"],
             ),
             disabled=["확인", "매체명", "제목", "게재일"],
@@ -279,7 +316,7 @@ with tab1:
 
         filename = f"결과보고서_{title}_{date.today():%Y%m%d}.xlsx"
         # on_click="ignore": 한쪽을 받아도 화면이 다시 그려지지 않아서 나머지 버튼이 유지됨
-        d1, d2 = st.columns(2)
+        d1, d2, d3 = st.columns(3)
         d1.download_button(
             "📑 PDF 보고서 다운로드",
             data=pdf_bytes,
@@ -296,6 +333,15 @@ with tab1:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width="stretch",
             on_click="ignore",
+        )
+        d3.download_button(
+            "💾 작업 저장",
+            data=dump_work(title, dist_date, rows, included, extra, manual),
+            file_name=f"작업_{company}_{dist_date:%y%m%d}.json",
+            mime="application/json",
+            width="stretch",
+            on_click="ignore",
+            help="내일 이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
         )
 
 # ------------------------------------------------------------------

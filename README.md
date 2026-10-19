@@ -46,6 +46,7 @@ Streamlit Cloud가 자동으로 재배포함 (몇 분 내 반영).
 - `app.py` — Streamlit 화면 (탭1: 결과보고서, 탭2: 월간 PR리포트)
 - `naver_news.py` — 결과보고서용 네이버 뉴스 검색 (배포일 전후 N일)
 - `report_sheet.py` — 결과보고서 엑셀 시트 조립 로직 (매체명 인식/정렬은 `resolve_coverage()`)
+- `work_file.py` — 결과보고서 작업 파일(.json) 저장·불러오기 (포함 해제·다음·구글 노출·직접 추가 기사를 다음 날 이어서 작업)
 - `article_meta.py` — 기사 URL로 매체명·제목·게재일 읽어오기 (결과보고서 탭의 다음·구글 기사 URL 붙여넣기용)
 - `report_pdf.py` — 결과보고서 PDF (핵심 수치 카드 + 기사별 막대, 주요 매체 게재, 포털/매체유형 분포, 게재 기사 전체 표. 제목 클릭 시 원문 이동)
 - `fonts/` — PDF용 폰트 (OFL 라이선스, PDF에 임베드되어 서버에 한글 폰트가 없어도 안 깨짐). 본문은 Pretendard, Pretendard에 없는 한자(韓·美·中 등)는 `NotoSansKR-Hanja-*.ttf`(Noto Sans KR에서 한자만 추려 굵기를 고정한 파일)로 표시
