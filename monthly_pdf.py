@@ -75,6 +75,9 @@ def _sections(ws):
                 out[cur] = {"title": re.sub(r"^\s*\d+\.\s*", "", b).strip(), "rows": []}
                 head_row = r + 1
             continue
+        if isinstance(b, str) and b.startswith("참고."):  # 앱이 쓴 기록용 부록 (단순 언급 기사 전체) - 읽지 않음
+            cur = None
+            continue
         if cur is None or r == head_row:
             continue
         cells = {c.column_letter: c for c in ws[r] if c.value is not None and str(c.value).strip() != ""}
@@ -133,32 +136,14 @@ def read_month_report(file, sheet_name):
              for r in sec.get("plans", {}).get("rows", []) if not str(val(r, "B") or "").startswith("*")]
     plan_title = sec.get("plans", {}).get("title") or f"{month % 12 + 1}월 PR 목표"
 
-    # Summary 시트: 월별 형식 추이
-    year, trend = None, None
-    sm_name = next((n for n in wb.sheetnames if n.lower().startswith("summary")), None)
-    if sm_name:
-        sm = wb[sm_name]
-        m = re.search(r"(\d{4})", str(sm["B2"].value or "") + sm_name)
-        year = int(m[1]) if m else None
-        rows = {}
-        for r in range(1, sm.max_row + 1):
-            name = str(sm.cell(r, 2).value or "").strip()
-            if name in TYPE_ORDER:
-                rows[name] = [_int(sm.cell(r, c).value) for c in range(3, 15)]
-        if rows:
-            z = [0] * 12
-            g = lambda k: rows.get(k, z)
-            trend = {
-                "release": g("보도자료"),
-                "planned": [sum(g(k)[i] for k in ("인터뷰", "기고", "기획(오픈피알)", "기획(외부)")) for i in range(12)],
-                "mention": g("단순언급"),
-            }
-            # 이번 달 칸이 아직 비어 있으면 월 시트 값으로 채움
-            i = month - 1
-            if trend["release"][i] + trend["planned"][i] + trend["mention"][i] == 0:
-                trend["release"][i] = types["보도자료"]
-                trend["planned"][i] = sum(types[k] for k in ("인터뷰", "기고", "기획(오픈피알)", "기획(외부)"))
-                trend["mention"][i] = types["단순언급"]
+    # Summary 시트: 월별 형식 추이 (이번 달 칸이 아직 비어 있으면 월 시트 값으로 채움)
+    year, rows = summary_rows(wb)
+    trend = None
+    if rows:
+        if sum(rows[k][month - 1] for k in TYPE_ORDER) == 0:
+            for k in TYPE_ORDER:
+                rows[k][month - 1] = types[k]
+        trend = trend_from_rows(rows)
     if year is None:
         dates = [a["date"] for a in arts if a["date"]]
         year = dates[0].year if dates else date.today().year
@@ -167,6 +152,45 @@ def read_month_report(file, sheet_name):
     return {"company": company, "year": year, "month": month, "types": types, "releases": releases,
             "articles": arts, "mentions": mentions, "meetings": meetings, "plans": plans,
             "plan_title": plan_title, "trend": trend}
+
+
+PLANNED_TYPES = ("인터뷰", "기고", "기획(오픈피알)", "기획(외부)")
+
+
+def summary_rows(wb):
+    """Summary 시트의 형식별 1~12월 값. 반환: (연도|None, {형식: [12개]}|None)"""
+    sm_name = next((n for n in wb.sheetnames if n.lower().startswith("summary")), None)
+    if not sm_name:
+        return None, None
+    sm = wb[sm_name]
+    m = re.search(r"(\d{4})", str(sm["B2"].value or "") + sm_name)
+    rows = {}
+    for r in range(1, sm.max_row + 1):
+        name = str(sm.cell(r, 2).value or "").strip()
+        if name in TYPE_ORDER:
+            rows[name] = [_int(sm.cell(r, c).value) for c in range(3, 15)]
+    if not rows:
+        return (int(m[1]) if m else None), None
+    for k in TYPE_ORDER:
+        rows.setdefault(k, [0] * 12)
+    return (int(m[1]) if m else None), rows
+
+
+def trend_from_rows(rows):
+    """{형식: [12개]} -> 막대 그래프용 {'release','planned','mention'}"""
+    return {
+        "release": list(rows["보도자료"]),
+        "planned": [sum(rows[k][i] for k in PLANNED_TYPES) for i in range(12)],
+        "mention": list(rows["단순언급"]),
+    }
+
+
+def assign_release(article, dates):
+    """보도자료 기사가 몇 번째 보도자료 건인지 (배포일이 기사 게재일 이전인 것 중 가장 늦은 것). 없으면 None."""
+    if article.get("kind") != "보도자료" or not article.get("date"):
+        return None
+    cand = [i for i, d in enumerate(dates) if d and d <= article["date"]]
+    return cand[-1] if cand else None
 
 
 def guess_release_dates(data):
@@ -487,12 +511,8 @@ def _draw_articles(doc, dates):
     arts = d["articles"]
     groups = [[] for _ in rels] + [[]]
     for a in arts:
-        k = len(rels)
-        if a["kind"] == "보도자료" and a["date"]:
-            cand = [i for i, dt in enumerate(dates) if dt and dt <= a["date"]]
-            if cand:
-                k = cand[-1]
-        groups[k].append(a)
+        k = assign_release(a, dates)
+        groups[len(rels) if k is None else k].append(a)
 
     doc.section(6, "주요 기사 리스트", f"전체 {len(arts)}건 · 제목을 누르면 기사로 이동")
     doc.top += 26

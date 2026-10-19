@@ -2,7 +2,7 @@
 """
 PR 리포트 도구 웹앱.
 - 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 + PDF 보고서 생성)
-- 탭2: 월간 PR리포트 (기존 워크북에 새 달 시트 추가 + 기사형식 자동분류, 완성된 엑셀 -> PDF)
+- 탭2: 월간 PR리포트 (한 달 기사 수집·자동분류 -> 앱에서 확인·수정 -> PDF + 기록용 엑셀, 완성된 엑셀 -> PDF)
 
 네이버 API 키는 Streamlit Cloud의 App settings > Secrets 에
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
@@ -10,7 +10,8 @@ NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
 import io
 import os
 import re
-from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
 
 import openpyxl
 import pandas as pd
@@ -24,9 +25,15 @@ from report_sheet import (
 from report_pdf import build_pdf
 from article_meta import fetch_article_meta, normalize_url
 from work_file import dump_work, load_work, restore_choices
-from pr_report_core import fetch_month_articles, build_month_tab, classify_report
+from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
-from monthly_pdf import month_sheets, read_month_report, guess_release_dates, default_summary, build_monthly_pdf
+from monthly_pdf import (
+    assign_release, build_monthly_pdf, default_summary, guess_release_dates, month_sheets, read_month_report,
+)
+from monthly_report import (
+    KIND_OPTIONS, build_record_xlsx, compose, guess_releases, initial_kind, sort_articles, trend_rows_from_xlsx,
+    dump_work as dump_month_work, load_work as load_month_work,
+)
 
 REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
@@ -349,152 +356,308 @@ with tab1:
 # 탭 2: 월간 PR리포트
 # ------------------------------------------------------------------
 with tab2:
-    st.caption("기존 파일에 새 달 시트를 추가하고, 기사형식이 보도자료인 것만 자동분류합니다.")
-
-    template_file = st.file_uploader(
-        "기존 PR리포트 파일 업로드", type=["xlsx"], key="pr_template"
+    st.caption(
+        "네이버에서 한 달 기사를 모아 앱에서 확인·수정하고, 고객사에 보낼 PDF를 바로 만듭니다. "
+        "숫자(형식별·보도자료별·관련 기사 수)는 아래 표에서 자동으로 계산됩니다."
     )
 
-    sheet_options = []
-    if template_file is not None:
+    m_work = st.file_uploader(
+        "이전 작업 불러오기 (아래 '💾 작업 저장'으로 받아둔 .json 파일을 올리면 수집한 기사와 수정 내용이 그대로 돌아옵니다)",
+        type=["json"],
+        key="m_work_file",
+    )
+    if m_work is not None and st.session_state.get("m_work_id") != m_work.file_id:
         try:
-            template_file.seek(0)
-            _preview_wb = openpyxl.load_workbook(template_file, read_only=True)
-            sheet_options = [s for s in _preview_wb.sheetnames if s.endswith("월")]
-            _preview_wb.close()
-        except Exception as e:
-            st.error(f"워크북을 열 수 없습니다: {e}")
+            w = load_month_work(m_work.getvalue())
+        except ValueError as e:
+            st.error(str(e))
+        else:
+            st.session_state["m_work_id"] = m_work.file_id
+            st.session_state["monthly"] = {
+                **w["meta"], "articles": w["articles"], "releases": w["releases"], "meetings": w["meetings"],
+                "plans": w["plans"], "summary": w["summary"], "trend_rows": w["trend_rows"],
+            }
+            st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
 
-    keyword2 = st.text_input("키워드", value="딥파인", key="pr_keyword")
-    c1, c2 = st.columns(2)
-    year = c1.number_input("연도", min_value=2000, max_value=2100, value=date.today().year, step=1, key="pr_year")
-    month = c2.number_input("새로 만들 달", min_value=1, max_value=12, value=date.today().month, step=1, key="pr_month")
+    m_base = st.file_uploader(
+        "지금까지의 PR리포트 엑셀 (선택) · 월별 추이·전월 비교에 쓰고, 이번 달 시트를 추가해 기록용 파일로 돌려드립니다",
+        type=["xlsx"],
+        key="m_base",
+    )
+    m_base_bytes = m_base.getvalue() if m_base is not None else None
 
-    if sheet_options:
-        template_sheet_name = st.selectbox(
-            "서식을 복제할 기존 월 시트 (가장 최근 달이 기본 선택됨)", sheet_options, index=0
-        )
-    else:
-        template_sheet_name = st.text_input("서식을 복제할 기존 월 시트 이름 (예: 6월)", key="pr_sheet_manual")
+    _last_month = date.today().replace(day=1) - timedelta(days=1)
+    with st.form("monthly_form"):
+        c1, c2, c3 = st.columns([2, 1, 1])
+        m_keyword = c1.text_input("키워드 (기업명)", value="딥파인", key="m_keyword")
+        m_year = c2.number_input("연도", min_value=2000, max_value=2100, value=_last_month.year, step=1, key="m_year")
+        m_month = c3.number_input("월", min_value=1, max_value=12, value=_last_month.month, step=1, key="m_month")
+        m_auto = st.checkbox("보도자료 자동 분류 (기사 본문을 확인해서 1~2분 걸립니다)", value=True, key="m_auto")
+        m_go = st.form_submit_button("기사 수집", type="primary")
 
-    do_classify = st.checkbox("기사형식 자동 분류도 실행", value=True, key="pr_classify")
-
-    if st.button("PR리포트 생성", type="primary", key="pr_submit"):
-        if template_file is None:
-            st.error("기존 워크북을 업로드하세요.")
-        elif not template_sheet_name:
-            st.error("서식을 복제할 월 시트 이름을 지정하세요.")
-        elif not keyword2:
+    if m_go:
+        if not m_keyword:
             st.error("키워드를 입력하세요.")
         elif not NAVER_CLIENT_ID:
             st.error("네이버 API 키가 없어 진행할 수 없습니다.")
         else:
-            template_file.seek(0)
-            wb = openpyxl.load_workbook(template_file)
-
-            if template_sheet_name not in wb.sheetnames:
-                st.error(f"'{template_sheet_name}' 시트를 찾을 수 없습니다. 현재 시트: {wb.sheetnames}")
-            else:
-                with st.spinner(f"네이버에서 '{keyword2}' 검색 중..."):
-                    try:
-                        articles = fetch_month_articles(
-                            keyword2, int(year), int(month), NAVER_CLIENT_ID, NAVER_CLIENT_SECRET
-                        )
-                    except Exception as e:
-                        st.error(f"뉴스 수집 실패: {e}")
-                        articles = None
-
-                if articles is not None:
-                    ws, new_count = build_month_tab(wb, template_sheet_name, int(month), int(year), keyword2, articles)
-                    sheet_name = f"{int(month)}월"
-                    st.success(f"'{sheet_name}' 시트 생성 완료. 3번 섹션에 기사 {new_count}건 채움.")
-
-                    if do_classify and new_count > 0:
-                        progress_bar = st.progress(0.0, text="기사형식 분류 준비 중...")
-
-                        def _cb(done, total, t, result):
-                            frac = done / total if total else 1.0
-                            progress_bar.progress(frac, text=f"[{done}/{total}] {result} - {t[:30]}")
-
-                        filled, blanked = classify_report(wb, sheet_name, keyword2, progress_callback=_cb)
-                        progress_bar.progress(1.0, text="분류 완료")
-                        st.info(
-                            f"확정 보도자료로 채운 행: {filled}건 / 공란으로 남은 행: {blanked}건 "
-                            "(공란은 인터뷰/기고/기획(오픈피알)/기획(외부)/단순언급 중 직접 확인해서 채워주세요)"
-                        )
-
-                    buf = io.BytesIO()
-                    wb.save(buf)
-                    buf.seek(0)
-                    filename = f"{int(year)}년_{int(month)}월_{keyword2}_PR리포트.xlsx"
-
-                    st.download_button(
-                        "⬇️ 엑셀 다운로드",
-                        data=buf,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                    st.caption(
-                        "1/2/4/5/6번 섹션은 지난달 데이터가 지워진 빈 템플릿 상태이니 직접 채워주세요. "
-                        "다음 달 작업을 위해 이번에 만든 파일을 템플릿으로 보관해두세요."
-                    )
-
-    # --- 다 채운 월간 리포트 엑셀 -> 고객사 전달용 PDF ---
-    st.divider()
-    st.subheader("📄 월간 리포트 PDF 만들기")
-    st.caption("1~6번 섹션을 다 채운 PR리포트 엑셀을 올리면, 고객사에 보낼 PDF로 만들어 줍니다.")
-
-    report_file = st.file_uploader("완성된 PR리포트 파일 업로드", type=["xlsx"], key="mpdf_file")
-    if report_file is not None:
-        try:
-            mpdf_sheets = month_sheets(report_file)
-        except Exception as e:
-            st.error(f"워크북을 열 수 없습니다: {e}")
-            mpdf_sheets = []
-        if not mpdf_sheets:
-            st.error("'8월'처럼 'N월' 이름의 시트를 찾지 못했습니다.")
-        else:
-            mpdf_sheet = st.selectbox("PDF로 만들 달", mpdf_sheets, index=0, key="mpdf_sheet")
-            try:
-                mdata = read_month_report(report_file, mpdf_sheet)
-            except Exception as e:
-                st.error(f"'{mpdf_sheet}' 시트를 읽지 못했습니다: {e}")
-                mdata = None
-
-            if mdata is not None:
-                st.caption(
-                    f"{mdata['company']} · 총 {sum(mdata['types'].values())}건 · "
-                    f"보도자료 {len(mdata['releases'])}건 · 주요 기사 {len(mdata['articles'])}건 · "
-                    f"단순 언급 주제 {len(mdata['mentions'])}개"
-                )
-                release_dates = []
-                if mdata["releases"]:
-                    st.markdown("**보도자료 배포일** · 기사 목록을 보도자료별로 묶는 데 씁니다 (기사가 몰린 날짜로 미리 채움)")
-                    guessed = guess_release_dates(mdata)
-                    for i, (rel, d0) in enumerate(zip(mdata["releases"], guessed)):
-                        release_dates.append(st.date_input(
-                            f"{i + 1}. {rel['title']} ({rel['count']}건)", value=d0,
-                            key=f"mpdf_date_{mpdf_sheet}_{i}",
-                        ))
-                summary_text = st.text_area(
-                    "이달의 요약 (PDF 1쪽에 들어갑니다. 비우면 빠짐)",
-                    value=default_summary(mdata), height=110, key=f"mpdf_summary_{mpdf_sheet}",
-                )
+            with st.spinner(f"네이버에서 '{m_keyword}' {int(m_month)}월 기사 검색 중..."):
                 try:
-                    mpdf_bytes = build_monthly_pdf(mdata, release_dates, summary_text)
+                    items = fetch_month_articles(m_keyword, int(m_year), int(m_month), NAVER_CLIENT_ID, NAVER_CLIENT_SECRET)
                 except Exception as e:
-                    st.error(f"PDF를 만들지 못했습니다: {e}")
-                    mpdf_bytes = None
-                if mpdf_bytes:
-                    st.download_button(
-                        "⬇️ 월간 리포트 PDF 다운로드",
-                        data=mpdf_bytes,
-                        file_name=f"{mdata['year']}년_{mdata['month']}월_{mdata['company']}_PR리포트.pdf",
-                        mime="application/pdf",
-                        type="primary",
-                        key="mpdf_download",
-                        on_click="ignore",
+                    st.error(f"뉴스 수집 실패: {e}")
+                    items = None
+            if items is not None:
+                auto = {}
+                if m_auto and items:
+                    bar = st.progress(0.0, text="보도자료 자동 분류 중...")
+                    with ThreadPoolExecutor(max_workers=6) as pool:
+                        futs = {pool.submit(classify_row, clean_html(it["title"]), it.get("originallink") or it.get("link"),
+                                            m_keyword): it for it in items}
+                        for n, fut in enumerate(as_completed(futs), 1):
+                            it = futs[fut]
+                            try:
+                                auto[id(it)] = fut.result()[0]
+                            except Exception:
+                                auto[id(it)] = None
+                            bar.progress(n / len(items), text=f"보도자료 자동 분류 [{n}/{len(items)}]")
+                    bar.empty()
+                arts = []
+                for it in items:
+                    t = clean_html(it["title"])
+                    arts.append({
+                        "url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": t,
+                        "date": it["_dt"].date(), "kind": initial_kind(t, m_keyword, auto.get(id(it))),
+                        "include": True, "group": "",
+                    })
+                st.session_state["monthly"] = {
+                    "company": m_keyword, "year": int(m_year), "month": int(m_month), "articles": arts,
+                    "releases": guess_releases(arts, m_keyword), "meetings": [], "plans": [],
+                    "summary": None, "trend_rows": None,
+                }
+                st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
+
+    M = st.session_state.get("monthly")
+    if M:
+        run = st.session_state["m_run"]
+        if m_base_bytes:
+            _, base_rows = trend_rows_from_xlsx(m_base_bytes)
+            if base_rows:
+                M["trend_rows"] = base_rows
+        st.success(
+            f"{M['company']} {M['year']}년 {M['month']}월 · 기사 {len(M['articles'])}건"
+            + ("" if M["trend_rows"] else " · 월별 추이·전월 비교는 PR리포트 엑셀을 올리면 함께 나옵니다")
+        )
+        company_name = st.text_input("PDF에 표시할 고객사명", value=M["company"], key=f"m_company_{run}")
+
+        # ① 보도자료
+        st.markdown("##### ① 이번 달 배포한 보도자료")
+        st.caption("보도자료 기사가 몰린 날짜로 미리 채웠습니다. 제목·배포일을 확인하고, 빠졌거나 틀린 건은 행을 추가·삭제하세요. "
+                   "형식이 '보도자료'인 기사는 배포일 기준으로 각 보도자료에 자동으로 묶입니다.")
+        rel_df = st.data_editor(
+            pd.DataFrame([{"제목": r["title"], "배포일": r["date"]} for r in M["releases"]],
+                         columns=["제목", "배포일"]).astype({"제목": "str"}),
+            num_rows="dynamic", hide_index=True, width="stretch", key=f"m_rel_{run}",
+            column_config={"제목": st.column_config.TextColumn("보도자료 제목", width="large"),
+                           "배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD")},
+        )
+        releases = []
+        for _, r in rel_df.iterrows():
+            t = "" if pd.isna(r["제목"]) else str(r["제목"]).strip()
+            d = r["배포일"]
+            if t and t != "None" and isinstance(d, date) and not pd.isna(d):
+                releases.append({"title": t, "date": d})
+        releases.sort(key=lambda r: r["date"])
+
+        # ② 기사
+        st.markdown("##### ② 기사 확인")
+        st.caption(
+            "**형식**을 확인하세요. 자동 분류는 보도자료만 잡고, 제목에 키워드가 없으면 단순언급으로 넣었습니다. "
+            "형식이 빈 기사는 PDF에서 빠집니다. 단순언급은 같은 주제끼리 **묶음**에 같은 이름(예: SCM FAIR)을 적으면 "
+            "하나로 묶여 '관련 기사 N건'으로 나옵니다. 보고서에서 뺄 기사는 **포함**을 해제하세요."
+        )
+        art_df = st.data_editor(
+            pd.DataFrame(
+                [{"포함": a["include"], "형식": a["kind"] or None, "묶음": a.get("group") or "",
+                  "매체": a["media"], "제목": a["title"], "게재일": a["date"], "URL": a["url"]} for a in M["articles"]],
+                columns=["포함", "형식", "묶음", "매체", "제목", "게재일", "URL"],
+            ).astype({"묶음": "str", "매체": "str", "제목": "str"}),
+            hide_index=True, width="stretch", height=min(38 + 35 * max(len(M["articles"]), 1), 560),
+            disabled=["URL"], key=f"m_arts_{run}",
+            column_config={
+                "포함": st.column_config.CheckboxColumn("포함", width="small"),
+                "형식": st.column_config.SelectboxColumn("형식", options=KIND_OPTIONS, width="small"),
+                "묶음": st.column_config.TextColumn("묶음 (단순언급)", width="small"),
+                "매체": st.column_config.TextColumn("매체", width="small"),
+                "제목": st.column_config.TextColumn("제목", width="large"),
+                "게재일": st.column_config.DateColumn("게재일", format="MM-DD", width="small"),
+                "URL": st.column_config.LinkColumn("원문", display_text="열기", width="small"),
+            },
+        )
+        articles = []
+        for (_, r), a in zip(art_df.iterrows(), M["articles"]):
+            text = lambda k, fb: fb if pd.isna(r[k]) else str(r[k]).strip()
+            d = r["게재일"]
+            articles.append({
+                "url": a["url"], "include": bool(r["포함"]),
+                "kind": "" if pd.isna(r["형식"]) or r["형식"] is None else str(r["형식"]),
+                "group": text("묶음", ""), "media": text("매체", a["media"]), "title": text("제목", a["title"]),
+                "date": d if isinstance(d, date) and not pd.isna(d) else a["date"],
+            })
+
+        with st.expander("➕ 네이버에 없는 기사 추가 (다음·구글 등에서 찾은 기사)"):
+            add_text = st.text_area("기사 링크 (한 줄에 하나씩)", key=f"m_add_urls_{run}", height=100,
+                                    placeholder="https://www.example.co.kr/news/...")
+            add_go = st.button("기사 정보 불러와서 추가", key=f"m_add_btn_{run}")
+
+        # ③ 미팅·목표
+        st.markdown("##### ③ 기자 미팅 · 다음 달 목표")
+        nm = M["month"] % 12 + 1
+        g1, g2 = st.columns(2)
+        meet_df = g1.data_editor(
+            pd.DataFrame(M["meetings"], columns=["매체", "기자", "주요 내용"]).astype(str),
+            num_rows="dynamic", hide_index=True, width="stretch", key=f"m_meet_{run}",
+        )
+        plan_df = g2.data_editor(
+            pd.DataFrame(M["plans"], columns=["형식", "내용", "진행 상황"]).astype(str),
+            num_rows="dynamic", hide_index=True, width="stretch", key=f"m_plan_{run}",
+            column_config={"형식": st.column_config.TextColumn("형식", help="예: 보도자료, 인터뷰, 기고, 기획")},
+        )
+        g1.caption("기자 미팅: 유의미한 미팅만 (인터뷰 피칭 가능성, 추가 미팅 요청 등)")
+        g2.caption(f"{nm}월 PR 목표")
+
+        def _rows(df):
+            out = []
+            for _, r in df.iterrows():
+                vals = tuple("" if pd.isna(v) or str(v) in ("None", "nan") else str(v).strip() for v in r.tolist())
+                if any(vals):
+                    out.append(vals)
+            return out
+
+        meetings, plans = _rows(meet_df), _rows(plan_df)
+
+        meta = {"company": company_name.strip() or M["company"], "year": M["year"], "month": M["month"]}
+        mdata, rel_dates, n_blank = compose(meta, articles, releases, meetings, plans, M["trend_rows"])
+
+        # ④ 요약
+        st.markdown("##### ④ 이달의 요약")
+        summary_text = st.text_area(
+            "PDF 1쪽에 들어갑니다 (비우면 빠짐)",
+            value=M["summary"] if M["summary"] is not None else default_summary(mdata),
+            height=110, key=f"m_summary_{run}",
+        )
+
+        if add_go:  # 지금까지 고친 내용을 저장한 뒤 기사를 붙이고 표를 다시 그림
+            urls = [u.rstrip(".,)") for u in re.findall(r"https?://[^\s<>\"']+", add_text or "")]
+            have = {normalize_url(a["url"]) for a in articles}
+            new = []
+            with st.spinner(f"기사 {len(urls)}건 정보 불러오는 중..."):
+                domain_map = load_domain_map()
+                for u in urls:
+                    if normalize_url(u) in have:
+                        continue
+                    meta_a = fetch_article_meta(u, domain_map)
+                    pub = meta_a["게재일자"].date() if meta_a["게재일자"] else date(M["year"], M["month"], 1)
+                    new.append({"url": meta_a["URL"], "media": meta_a["매체명"], "title": meta_a["제목"] or u,
+                                "date": pub, "kind": "", "include": True, "group": ""})
+                    have.add(normalize_url(u))
+            M.update(articles=sort_articles(articles + new), releases=releases, meetings=meetings, plans=plans,
+                     summary=summary_text, company=meta["company"])
+            st.session_state["m_run"] = run + 1
+            st.rerun()
+
+        # 집계 미리보기
+        t = mdata["types"]
+        st.caption(
+            "집계: " + " · ".join(f"{k} {t[k]}" for k in t if t[k]) + f" · 합계 **{sum(t.values())}건**"
+            + (" | 보도자료별: " + " · ".join(f"{i + 1}) {r['count']}건" for i, r in enumerate(mdata["releases"]))
+               if mdata["releases"] else "")
+            + f" | 단순 언급 주제 {len(mdata['mentions'])}개"
+        )
+        if n_blank:
+            st.warning(f"형식이 비어 있는 기사 {n_blank}건은 PDF에서 빠집니다. 표에서 형식을 골라주세요.")
+        no_release = sum(1 for a in articles if a["include"] and a["kind"] == "보도자료"
+                         and assign_release(a, rel_dates) is None)
+        if no_release:
+            st.warning(f"형식이 보도자료인데 배포일 이전 기사라 어느 보도자료에도 묶이지 않은 기사 {no_release}건이 있습니다 "
+                       "(PDF에서 '기획·기타'로 나갑니다). ① 보도자료 배포일을 확인하세요.")
+
+        try:
+            m_pdf = build_monthly_pdf(mdata, rel_dates, summary_text)
+        except Exception as e:
+            st.error(f"PDF를 만들지 못했습니다: {e}")
+            m_pdf = None
+        m_xlsx = build_record_xlsx(m_base_bytes, mdata, articles)
+        fname = f"{M['year']}년_{M['month']}월_{meta['company']}_PR리포트"
+        b1, b2, b3 = st.columns(3)
+        if m_pdf:
+            b1.download_button("📑 PDF 리포트 다운로드", data=m_pdf, file_name=f"{fname}.pdf", mime="application/pdf",
+                               type="primary", width="stretch", on_click="ignore", key="m_dl_pdf")
+        b2.download_button(
+            "⬇️ 기록용 엑셀", data=m_xlsx, file_name=f"{fname}_{date.today():%Y%m%d}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch",
+            on_click="ignore", key="m_dl_xlsx",
+            help="올린 PR리포트 엑셀에 이번 달 시트를 추가하고 Summary를 갱신한 파일입니다. 다음 달에 이 파일을 올리면 추이가 이어집니다.",
+        )
+        b3.download_button(
+            "💾 작업 저장",
+            data=dump_month_work(meta, articles, releases, meetings, plans, summary_text, M["trend_rows"]),
+            file_name=f"월간작업_{meta['company']}_{M['year']}{M['month']:02d}.json", mime="application/json",
+            width="stretch", on_click="ignore", key="m_dl_work",
+            help="이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
+        )
+
+    # --- 예전 방식: 손으로 다 채운 엑셀 -> PDF ---
+    with st.expander("📄 완성된 PR리포트 엑셀로 PDF 만들기 (지난달 리포트를 다시 뽑을 때)"):
+        report_file = st.file_uploader("완성된 PR리포트 파일 업로드", type=["xlsx"], key="mpdf_file")
+        if report_file is not None:
+            try:
+                mpdf_sheets = month_sheets(report_file)
+            except Exception as e:
+                st.error(f"워크북을 열 수 없습니다: {e}")
+                mpdf_sheets = []
+            if not mpdf_sheets:
+                st.error("'8월'처럼 'N월' 이름의 시트를 찾지 못했습니다.")
+            else:
+                mpdf_sheet = st.selectbox("PDF로 만들 달", mpdf_sheets, index=0, key="mpdf_sheet")
+                try:
+                    xdata = read_month_report(report_file, mpdf_sheet)
+                except Exception as e:
+                    st.error(f"'{mpdf_sheet}' 시트를 읽지 못했습니다: {e}")
+                    xdata = None
+
+                if xdata is not None:
+                    st.caption(
+                        f"{xdata['company']} · 총 {sum(xdata['types'].values())}건 · "
+                        f"보도자료 {len(xdata['releases'])}건 · 주요 기사 {len(xdata['articles'])}건 · "
+                        f"단순 언급 주제 {len(xdata['mentions'])}개"
                     )
+                    x_dates = []
+                    if xdata["releases"]:
+                        st.markdown("**보도자료 배포일** · 기사 목록을 보도자료별로 묶는 데 씁니다 (기사가 몰린 날짜로 미리 채움)")
+                        for i, (rel, d0) in enumerate(zip(xdata["releases"], guess_release_dates(xdata))):
+                            x_dates.append(st.date_input(
+                                f"{i + 1}. {rel['title']} ({rel['count']}건)", value=d0,
+                                key=f"mpdf_date_{mpdf_sheet}_{i}",
+                            ))
+                    x_summary = st.text_area(
+                        "이달의 요약 (PDF 1쪽에 들어갑니다. 비우면 빠짐)",
+                        value=default_summary(xdata), height=110, key=f"mpdf_summary_{mpdf_sheet}",
+                    )
+                    try:
+                        x_pdf = build_monthly_pdf(xdata, x_dates, x_summary)
+                    except Exception as e:
+                        st.error(f"PDF를 만들지 못했습니다: {e}")
+                        x_pdf = None
+                    if x_pdf:
+                        st.download_button(
+                            "⬇️ 월간 리포트 PDF 다운로드",
+                            data=x_pdf,
+                            file_name=f"{xdata['year']}년_{xdata['month']}월_{xdata['company']}_PR리포트.pdf",
+                            mime="application/pdf",
+                            key="mpdf_download",
+                            on_click="ignore",
+                        )
 
 # ------------------------------------------------------------------
 # 탭 3: 네이버 기사 수집
