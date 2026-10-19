@@ -29,7 +29,7 @@ from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
 from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf, default_summary, read_history
 from monthly_report import (
-    KIND_OPTIONS, compose, guess_releases, initial_kind, sort_articles, trend_rows_from_xlsx,
+    KIND_OPTIONS, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
 
@@ -432,7 +432,7 @@ with tab2:
                 st.session_state["monthly"] = {
                     "company": m_keyword, "year": int(m_year), "month": int(m_month), "articles": arts,
                     "releases": guess_releases(arts, m_keyword), "meetings": [], "plans": [],
-                    "summary": None, "trend_rows": None,
+                    "summary": None, "trend_rows": history_from_secrets(st.secrets, m_keyword, int(m_year)),
                 }
                 st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
                 st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
@@ -468,6 +468,8 @@ with tab2:
         kind_, text_ = st.session_state.get("m_prev_msg", (None, None))
         if kind_:
             getattr(st, kind_)(text_)
+        elif M["trend_rows"] and M["trend_rows"] == history_from_secrets(st.secrets, M["company"], M["year"]):
+            st.info("앱에 저장해 둔 월별 건수(Secrets)를 불러왔습니다. 지난달 PDF를 올리면 그 기록으로 바뀝니다.")
         st.success(f"{M['company']} {M['year']}년 {M['month']}월 · 기사 {len(M['articles'])}건")
         company_name = st.text_input("PDF에 표시할 고객사명", value=M["company"], key=f"m_company_{run}")
 

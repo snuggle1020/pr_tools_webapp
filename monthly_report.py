@@ -101,6 +101,21 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
 
 # ---------------------------------------------------------------- 월별 기록 불러오기
 
+def history_from_secrets(secrets, company, year):
+    """Streamlit Secrets 의 [monthly_history."고객사"."연도"] 에 넣어 둔 형식별 1~12월 건수 (저장소가 공개라 코드 대신 Secrets에 둠).
+    고객사 이름은 그대로 또는 서로 포함되면 맞는 것으로 본다. 없으면 None."""
+    try:
+        hist = secrets["monthly_history"]
+        name = next((k for k in hist if k == company), None) or next(
+            (k for k in hist if k in company or company in k), None)
+        if name is None or str(year) not in hist[name]:
+            return None
+        src = hist[name][str(year)]
+        return {k: [int(x) for x in (list(src.get(k, [])) + [0] * 12)[:12]] for k in TYPE_ORDER}
+    except Exception:
+        return None
+
+
 def trend_rows_from_xlsx(base_bytes):
     """기존 PR리포트 엑셀의 Summary 값 {형식: [12]} 과 연도. 없으면 (None, None)."""
     if not base_bytes:
