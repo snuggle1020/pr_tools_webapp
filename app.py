@@ -2,7 +2,7 @@
 """
 PR 리포트 도구 웹앱.
 - 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 + PDF 보고서 생성)
-- 탭2: 월간 PR리포트 (기존 워크북에 새 달 시트 추가 + 기사형식 자동분류)
+- 탭2: 월간 PR리포트 (기존 워크북에 새 달 시트 추가 + 기사형식 자동분류, 완성된 엑셀 -> PDF)
 
 네이버 API 키는 Streamlit Cloud의 App settings > Secrets 에
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
@@ -26,6 +26,7 @@ from article_meta import fetch_article_meta, normalize_url
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, build_month_tab, classify_report
 from daily_collect_sheet import build_daily_sheet
+from monthly_pdf import month_sheets, read_month_report, guess_release_dates, default_summary, build_monthly_pdf
 
 REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
@@ -436,6 +437,63 @@ with tab2:
                     st.caption(
                         "1/2/4/5/6번 섹션은 지난달 데이터가 지워진 빈 템플릿 상태이니 직접 채워주세요. "
                         "다음 달 작업을 위해 이번에 만든 파일을 템플릿으로 보관해두세요."
+                    )
+
+    # --- 다 채운 월간 리포트 엑셀 -> 고객사 전달용 PDF ---
+    st.divider()
+    st.subheader("📄 월간 리포트 PDF 만들기")
+    st.caption("1~6번 섹션을 다 채운 PR리포트 엑셀을 올리면, 고객사에 보낼 PDF로 만들어 줍니다.")
+
+    report_file = st.file_uploader("완성된 PR리포트 파일 업로드", type=["xlsx"], key="mpdf_file")
+    if report_file is not None:
+        try:
+            mpdf_sheets = month_sheets(report_file)
+        except Exception as e:
+            st.error(f"워크북을 열 수 없습니다: {e}")
+            mpdf_sheets = []
+        if not mpdf_sheets:
+            st.error("'8월'처럼 'N월' 이름의 시트를 찾지 못했습니다.")
+        else:
+            mpdf_sheet = st.selectbox("PDF로 만들 달", mpdf_sheets, index=0, key="mpdf_sheet")
+            try:
+                mdata = read_month_report(report_file, mpdf_sheet)
+            except Exception as e:
+                st.error(f"'{mpdf_sheet}' 시트를 읽지 못했습니다: {e}")
+                mdata = None
+
+            if mdata is not None:
+                st.caption(
+                    f"{mdata['company']} · 총 {sum(mdata['types'].values())}건 · "
+                    f"보도자료 {len(mdata['releases'])}건 · 주요 기사 {len(mdata['articles'])}건 · "
+                    f"단순 언급 주제 {len(mdata['mentions'])}개"
+                )
+                release_dates = []
+                if mdata["releases"]:
+                    st.markdown("**보도자료 배포일** · 기사 목록을 보도자료별로 묶는 데 씁니다 (기사가 몰린 날짜로 미리 채움)")
+                    guessed = guess_release_dates(mdata)
+                    for i, (rel, d0) in enumerate(zip(mdata["releases"], guessed)):
+                        release_dates.append(st.date_input(
+                            f"{i + 1}. {rel['title']} ({rel['count']}건)", value=d0,
+                            key=f"mpdf_date_{mpdf_sheet}_{i}",
+                        ))
+                summary_text = st.text_area(
+                    "이달의 요약 (PDF 1쪽에 들어갑니다. 비우면 빠짐)",
+                    value=default_summary(mdata), height=110, key=f"mpdf_summary_{mpdf_sheet}",
+                )
+                try:
+                    mpdf_bytes = build_monthly_pdf(mdata, release_dates, summary_text)
+                except Exception as e:
+                    st.error(f"PDF를 만들지 못했습니다: {e}")
+                    mpdf_bytes = None
+                if mpdf_bytes:
+                    st.download_button(
+                        "⬇️ 월간 리포트 PDF 다운로드",
+                        data=mpdf_bytes,
+                        file_name=f"{mdata['year']}년_{mdata['month']}월_{mdata['company']}_PR리포트.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        key="mpdf_download",
+                        on_click="ignore",
                     )
 
 # ------------------------------------------------------------------
