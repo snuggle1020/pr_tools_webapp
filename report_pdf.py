@@ -36,7 +36,6 @@ BLUE = HexColor("#1F4ED8")      # 네이버 CP / 강조
 LIGHT_BLUE = HexColor("#7EA0F0")  # 네이버 검색제휴
 GREEN = HexColor("#2EA279")       # 다음
 GRAY = HexColor("#C8CDD8")
-ORANGE = HexColor("#B45309")     # [확인필요] 표시
 PILL_BG = HexColor("#EEF0F4")    # 묶음 기사 표시 바탕
 WHITE = HexColor("#FFFFFF")
 WEEKDAYS = "월화수목금토일"
@@ -50,7 +49,6 @@ BOTTOM = 40
 PORTALS = [("네이버 CP", BLUE), ("네이버 검색제휴", LIGHT_BLUE), ("다음", GREEN), ("구글", GRAY)]
 PORTAL_COLOR = dict(PORTALS)
 PORTAL_RANK = {name: i for i, (name, _) in enumerate(PORTALS)}
-REVIEW_PREFIX = "[확인필요] "
 FEATURED_COUNT = 4  # 주요 매체 게재 기사 수
 
 # Pretendard에는 한자(韓·美·中 등)가 없어서, 없는 글자만 Noto Sans KR로 찍는다.
@@ -191,9 +189,6 @@ def _prepare(rows):
     out = []
     for r in rows:
         title = r["제목"]
-        review = title.startswith(REVIEW_PREFIX)
-        if review:
-            title = title[len(REVIEW_PREFIX):]
         portals = r.get("포털") or ["네이버"]
         naver = "네이버" in portals
         cp = naver and bool(r.get("네이버CP"))
@@ -202,7 +197,6 @@ def _prepare(rows):
             "title": title,
             "url": r["URL"],
             "dt": r["게재일자"],
-            "review": review,
             "cp": cp,
             "naver": naver,
             # 대표 포털 (막대·점 색과 집계 기준): 네이버 CP > 네이버 검색제휴 > 다음 > 구글
@@ -447,8 +441,7 @@ def _table_rows(arts):
     title_w = COLS[2][2]
     rows = []
     for a in arts:
-        title = ("[확인필요] " if a["review"] else "") + a["title"]
-        lines = _wrap(title, REG, ROW_FONT, title_w)
+        lines = _wrap(a["title"], REG, ROW_FONT, title_w)
         media_lines = _wrap(a["media"], SEMI, ROW_FONT, COLS[1][2] - 10)
         n = max(len(lines), len(media_lines))
         rows.append((a, lines, media_lines, 12 + max(n, 1) * ROW_LEAD + (2 if n == 1 else 0)))
@@ -509,12 +502,7 @@ def _draw_table_page(p, top, rows, first):
             p.text(x + COLS[1][1] + 10, mt + k * ROW_LEAD, ml, font=SEMI, size=ROW_FONT)
         tt = ctop(len(lines))
         for k, line in enumerate(lines):
-            if k == 0 and a["review"]:
-                tag = "[확인필요] "
-                nx = p.text(x + COLS[2][1], tt, tag, font=SEMI, size=ROW_FONT, color=ORANGE)
-                p.text(nx, tt, line[len(tag):], size=ROW_FONT)
-            else:
-                p.text(x + COLS[2][1], tt + k * ROW_LEAD, line, size=ROW_FONT)
+            p.text(x + COLS[2][1], tt + k * ROW_LEAD, line, size=ROW_FONT)
         p.link(a["url"], x + COLS[2][1], row_top, COLS[2][2], h)
         p.text(x + COLS[3][1], one, a["category"], size=ROW_FONT, color=MUTED)
 
@@ -532,15 +520,13 @@ def _draw_table_page(p, top, rows, first):
     return top + card_h, rest
 
 
-def _draw_footer(p, top, has_review, portals):
+def _draw_footer(p, top, portals):
     top += 20
     p.hline(X0, top, W)
     left = f"본 보고서는 {'·'.join(portals)} 포털 모니터링 결과를 바탕으로 작성되었습니다."
     right = "Prepared by OPENPR"
     p.text(X0, top + 20, left, size=8.5, color=MUTED)
     p.text(X0 + W, top + 20, right, size=8.5, color=MUTED, align="right")
-    if has_review:
-        p.text(X0, top + 36, "[확인필요] 표시 기사는 해당 보도자료 기사인지 담당자 확인이 필요합니다", size=8.5, color=ORANGE)
 
 
 # ---------------------------------------------------------------- 진입점
@@ -592,6 +578,6 @@ def build_pdf(title, company, distribution_date, rows, window_days=3, generated_
         if not remaining:
             break
     used_portals = [n for n in ("네이버", "다음", "구글") if n == "네이버" or any(n in a["portals_text"] for a in arts)]
-    _draw_footer(p, end, any(a["review"] for a in arts), used_portals)
+    _draw_footer(p, end, used_portals)
     c.save()
     return buf.getvalue()

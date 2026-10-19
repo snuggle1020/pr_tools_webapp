@@ -67,7 +67,7 @@ def title_relevance(release_title: str, company: str, article_title: str) -> flo
     같은 회사의 인터뷰·다른 소식처럼 회사명만 겹치는 기사를 골라내기 위한 참고값.
     실측: 해당 보도자료 기사는 대부분 0.2 이상, 인터뷰·무관 기사는 0.05 이하."""
     rel = _bigrams(release_title.replace(company, ""))
-    art = _bigrams(article_title.replace(company, "").replace("[확인필요]", ""))
+    art = _bigrams(article_title.replace(company, ""))
     return len(rel & art) / len(rel) if rel else 1.0
 
 

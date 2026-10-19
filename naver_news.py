@@ -203,13 +203,14 @@ def collect_coverage(
     verify_relevance: True(기본값)면 한 단계 더 나아가 "진짜 이 기업에 관한 보도자료가
     맞는지"까지 검증한다 - 제목이 기업명으로 시작하면 확정 통과, 애매하면(본문에
     언급은 있지만 "~라고 밝혔다" 같은 보도자료 문장 패턴을 못 찾은 경우) 실제로 관련
-    기사인데 표현만 다를 수 있어서(예: "체결했다") 제외하지 않고 제목 앞에
-    "[확인필요] "를 붙여 포함한다. 이건 "이 특정 보도자료의 커버리지만 뽑고 싶다"는
+    기사인데 표현만 다를 수 있어서(예: "체결했다") 제외하지 않고 포함하되
+    "확인필요": True 로 표시한다 (제목은 원래대로 둠). 이건 "이 특정 보도자료의 커버리지만 뽑고 싶다"는
     결과보고서/PR리포트용 정밀 검증이라 느리다(기사 본문을 열어봄).
     False면 require_text가 단어로 등장하기만 하면 다 포함한다(빠름, 본문 조회 없음)
     - "이 키워드 걸린 기사를 그냥 다 모아줘"라는 네이버 기사 수집 탭에 맞는 동작.
 
-    반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버", "네이버CP": bool}, ...]
+    반환 형식: [{"매체명": ..., "제목": ..., "URL": ..., "게재일자": datetime, "게재포털": "네이버",
+                 "네이버CP": bool, "확인필요": bool}, ...]
     URL 기준 중복 제거, 게재일자 오름차순 정렬.
     """
     dist_dt = datetime.strptime(distribution_date, "%Y-%m-%d")
@@ -233,6 +234,7 @@ def collect_coverage(
 
         title = _strip_tags(item.get("title", ""))
         description = _strip_tags(item.get("description", ""))
+        needs_review = False
         if require_text and not verify_relevance:
             if not _contains_word(title, require_text) and not _contains_word(description, require_text):
                 continue
@@ -240,8 +242,7 @@ def collect_coverage(
             status = _relevance_status(title, url, require_text, description)
             if status == "excluded":
                 continue
-            if status == "ambiguous":
-                title = f"[확인필요] {title}"
+            needs_review = status == "ambiguous"
 
         seen_urls.add(url)
 
@@ -254,6 +255,7 @@ def collect_coverage(
                 "게재포털": "네이버",  # API 출처 표시. 구글/다음 게재 여부는 수동 확인 필요
                 # 네이버 뉴스 인링크(n.news.naver.com)가 있으면 콘텐츠제휴(CP) 매체, 없으면 검색제휴
                 "네이버CP": "n.news.naver.com" in (item.get("link") or ""),
+                "확인필요": needs_review,  # 본문에 보도자료식 문장을 못 찾음 -> 앱 '확인' 칸에 표시
             }
         )
 

@@ -139,10 +139,10 @@ with tab1:
         )
 
         def _check_note(r):
+            if r.get("확인필요"):
+                return "⚠ 본문 확인 필요"
             if title_relevance(title, company, r["제목"]) < LOW_RELEVANCE:
                 return "⚠ 제목이 보도자료와 다름"
-            if r["제목"].startswith("[확인필요]"):
-                return "⚠ 본문 확인 필요"
             return ""
 
         notes = [_check_note(r) for r in rows]
