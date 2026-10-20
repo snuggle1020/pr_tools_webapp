@@ -101,6 +101,7 @@ with tab1:
             st.session_state["saved_work"] = saved_work
             st.session_state["report_title_input"] = saved_work["title"]
             st.session_state["report_date_input"] = saved_work["distribution_date"]
+            st.session_state["report_company_input"] = saved_work.get("company", "")
     if work_file is None and st.session_state.pop("work_file_id", None):  # 올렸던 파일을 뺐으면 불러온 작업도 해제
         st.session_state.pop("saved_work", None)
     if st.session_state.get("saved_work"):
@@ -114,6 +115,10 @@ with tab1:
         title = st.text_input("보도자료 제목", key="report_title_input",
                               placeholder="예: 딥파인, 국방·산업 현장용 스마트글래스 기반 AI 에이전트 개발 나선다")
         distribution_date = st.date_input("배포일", key="report_date_input")
+        company_input = st.text_input(
+            "기업명 (자동 인식이 틀릴 때만 입력)", key="report_company_input",
+            placeholder="비워두면 보도자료 제목에서 자동으로 찾습니다. 이 이름으로 네이버를 검색합니다.",
+        )
         existing_file = st.file_uploader(
             "기존 결과보고서 파일 (파일을 추가하면 맨 왼쪽에 새 시트를 추가합니다 / 없으면 새 파일을 생성합니다)",
             type=["xlsx"],
@@ -127,8 +132,8 @@ with tab1:
         elif not NAVER_CLIENT_ID:
             st.error("네이버 API 키가 없어 진행할 수 없습니다.")
         else:
-            company = derive_company(title)
-            keyword = derive_keyword(title)
+            company = company_input.strip() or derive_company(title)
+            keyword = company_input.strip() or derive_keyword(title)
             dist_str = distribution_date.strftime("%Y-%m-%d")
             with st.spinner(f"네이버에서 '{keyword}' 검색 중..."):
                 try:
@@ -147,6 +152,7 @@ with tab1:
                 # 다음·구글 수동 입력으로 화면이 다시 그려져도(rerun) 결과가 유지되도록 세션에 보관
                 st.session_state["report"] = {
                     "title": title,
+                    "company_input": company_input.strip(),
                     "company": company,
                     "keyword": keyword,
                     "dist_date": distribution_date,
@@ -372,7 +378,7 @@ with tab1:
         )
         d3.download_button(
             "💾 작업 저장",
-            data=dump_work(title, dist_date, rows, included, extra, manual),
+            data=dump_work(title, dist_date, rows, included, extra, manual, company=report.get("company_input", "")),
             file_name=f"작업_{company}_{dist_date:%y%m%d}.json",
             mime="application/json",
             width="stretch",

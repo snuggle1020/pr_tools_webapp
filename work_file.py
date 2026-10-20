@@ -15,13 +15,14 @@ from article_meta import normalize_url
 VERSION = 1
 
 
-def dump_work(title, dist_date, rows, included, extra, manual) -> bytes:
+def dump_work(title, dist_date, rows, included, extra, manual, company="") -> bytes:
     """rows: 이번에 수집한 네이버 기사 전체 / included: 그중 '포함'된 기사 /
     extra: {URL: {"다음","구글"}} / manual: 다음·구글에서만 찾은 기사 목록."""
     included_urls = {r["URL"] for r in included}
     data = {
         "version": VERSION,
         "title": title,
+        "company": company,  # 기업명을 직접 입력했을 때만 값이 있음
         "distribution_date": dist_date.isoformat(),
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "excluded_urls": [r["URL"] for r in rows if r["URL"] not in included_urls],
@@ -42,6 +43,7 @@ def load_work(raw: bytes) -> dict:
         data["title"] = str(data["title"])
     except Exception:
         raise ValueError("작업 파일을 읽을 수 없습니다. '작업 저장'으로 받은 .json 파일인지 확인하세요.")
+    data.setdefault("company", "")
     data.setdefault("excluded_urls", [])
     data.setdefault("portals", {})
     data.setdefault("manual", [])

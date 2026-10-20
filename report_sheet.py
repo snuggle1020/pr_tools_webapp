@@ -38,12 +38,27 @@ def domain_of(url: str) -> str:
     return urlparse(url).netloc.replace("www.", "")
 
 
+_QUOTED_NAME = re.compile(r"[‘'\"“]([^’'\"”]{2,20})[’'\"”]")
+
+
 def derive_company(title: str) -> str:
-    """보도자료 제목은 관례적으로 '{기업명}, ...' 형식이라 쉼표 앞부분을 기업명으로 사용."""
+    """보도자료 제목은 관례적으로 '{기업명}, ...' 형식이라 쉼표 앞부분에서 기업명을 뽑는다.
+    쉼표 앞이 수식어로 길어지는 제목도 처리한다:
+      "AI 기반 소셜 리스닝 솔루션 '싱클리', ..."   -> 따옴표 안 이름: 싱클리
+      "AI로 트램 사고 위험 사전 감지... 딥파인, ..." -> 말줄임표 뒤: 딥파인
+      "제조 AI 전문 기업 엠아이큐브솔루션, ..."     -> 세 단어 이상이면 마지막 단어"""
+    head = title
     for comma in [",", "，"]:
         if comma in title:
-            return title.split(comma, 1)[0].strip()
-    return title.strip()
+            head = title.split(comma, 1)[0]
+            break
+    head = head.strip()
+    m = _QUOTED_NAME.search(head)
+    if m:
+        return m.group(1).strip()
+    head = re.split(r"\.{2,}|…", head)[-1].strip()
+    words = head.split()
+    return words[-1] if len(words) > 2 else head
 
 
 def derive_keyword(title: str) -> str:
