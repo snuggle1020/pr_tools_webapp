@@ -38,6 +38,7 @@ GREEN = HexColor("#2EA279")       # 다음
 GRAY = HexColor("#C8CDD8")
 PILL_BG = HexColor("#EEF0F4")    # 묶음 기사 표시 바탕
 WHITE = HexColor("#FFFFFF")
+BADGE_BG = HexColor("#E6ECFB")   # 주요 매체 카드의 매체명 뱃지 바탕
 WEEKDAYS = "월화수목금토일"
 
 PAGE_W, PAGE_H = A4
@@ -367,10 +368,10 @@ def _draw_featured(p, top, arts, limit, dry_run=False):
     for pair, wrapped, h in card_rows:
         for j, (a, lines) in enumerate(zip(pair, wrapped)):
             x = X0 + j * (cw + gap)
-            p.rect(x, top, cw, h, fill=WHITE, stroke=LINE, r=6)
-            p.rect(x, top, cw, 9, fill=BLUE, r=6)  # 상단 파란 띠 (모서리만 둥글게)
-            p.rect(x + 0.8, top + 2.5, cw - 1.6, 7, fill=WHITE)
-            p.text(x + 15, top + 15, a["media"], font=BOLD, size=9.3, color=BLUE)
+            p.rect(x, top, cw, h, fill=WHITE, stroke=LINE, r=8)
+            badge_w = min(_sw(a["media"], BOLD, 8.5) + 14, cw - 28)  # 매체명 뱃지
+            p.rect(x + 14, top + 11, badge_w, 15, fill=BADGE_BG, r=7.5)
+            p.text(x + 14 + badge_w / 2, top + 14.5, a["media"], font=BOLD, size=8.5, color=BLUE, align="center")
             lt = top + 34
             for line in lines:
                 p.text(x + 15, lt, line, font=MED, size=size)
