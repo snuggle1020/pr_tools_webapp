@@ -238,7 +238,11 @@ with tab1:
                 for u in re.findall(r"https?://[^\s<>\"']+", text or ""):
                     portals_by_url.setdefault(u.rstrip(".,)"), set()).add(portal)
             naver_by_url = {normalize_url(r["URL"]): r["URL"] for r in rows}
-            matched, fetched = {}, []
+            prev = st.session_state.get(fetched_key, {"matched": {}, "fetched": [], "n": 0})
+            # 지금 표에 있는 기사(불러온 작업·이전에 불러온 기사·직접 고친 내용)는 그대로 두고 새 기사만 아래에 추가
+            fetched = [dict(m) for m in st.session_state.get(f"manual_table_{run}", prev["fetched"])]
+            by_url = {normalize_url(m["URL"]): m for m in fetched if m["URL"]}
+            matched = {u: set(ps) for u, ps in prev["matched"].items()}
             with st.spinner(f"기사 {len(portals_by_url)}건 정보 불러오는 중..."):
                 domain_map = load_domain_map()
                 for u, ps in portals_by_url.items():
@@ -246,11 +250,14 @@ with tab1:
                     if naver_url:
                         matched.setdefault(naver_url, set()).update(ps)
                         continue
+                    if normalize_url(u) in by_url:  # 이미 표에 있는 기사면 포털만 더함
+                        by_url[normalize_url(u)]["포털"] = set(by_url[normalize_url(u)]["포털"]) | ps
+                        continue
                     meta = fetch_article_meta(u, domain_map)
                     meta["포털"] = ps
                     fetched.append(meta)
-            prev_n = st.session_state.get(fetched_key, {}).get("n", 0)
-            st.session_state[fetched_key] = {"matched": matched, "fetched": fetched, "n": prev_n + 1}
+                    by_url[normalize_url(u)] = meta
+            st.session_state[fetched_key] = {"matched": matched, "fetched": fetched, "n": prev["n"] + 1}
         fetched_state = st.session_state.get(fetched_key, {"matched": {}, "fetched": [], "n": 0})
 
         for url, ps in fetched_state["matched"].items():
@@ -284,7 +291,7 @@ with tab1:
                 "비고": st.column_config.TextColumn("비고", width="medium"),
             },
         )
-        manual, skipped = [], 0
+        manual, skipped, table_now = [], 0, []
         for _, m in manual_df.iterrows():
             media, art_title, url = (
                 "" if pd.isna(m.get(k)) else str(m.get(k)).strip() for k in ("매체명", "제목", "URL")
@@ -292,15 +299,23 @@ with tab1:
             portals = [p for p in EXTRA_PORTALS if m.get(p) == True]  # noqa: E712 (NaN/None 은 False)
             if not (media or art_title or url):
                 continue  # 빈 행
+            pub = m.get("게재일")
+            pub = pub if isinstance(pub, date) and not pd.isna(pub) else dist_date
+            note = m.get("비고")
+            table_now.append({
+                "매체명": media, "제목": art_title, "URL": url,
+                "게재일자": datetime.combine(pub, datetime.min.time()), "포털": set(portals),
+                "note": "" if note is None or pd.isna(note) else str(note),
+            })
             if not (media and art_title and url and portals):
                 skipped += 1
                 continue
-            pub = m.get("게재일")
-            pub = pub if isinstance(pub, date) and not pd.isna(pub) else dist_date
             manual.append({
                 "매체명": media, "제목": art_title, "URL": url,
                 "게재일자": datetime.combine(pub, datetime.min.time()), "포털": portals,
             })
+        # 다음에 '기사 정보 불러오기'를 누를 때 지금 표 내용을 그대로 이어가기 위해 보관
+        st.session_state[f"manual_table_{run}"] = table_now
         if skipped:
             st.warning(f"매체명·제목·URL·포털(다음/구글) 중 빈 칸이 있는 {skipped}개 행은 보고서에서 빠졌습니다.")
 
