@@ -19,8 +19,8 @@ import streamlit as st
 
 from naver_news import collect_coverage
 from report_sheet import (
-    EXTRA_PORTALS, LOW_RELEVANCE, apply_manual_portals, build_sheet, derive_company, derive_keyword,
-    load_domain_map, resolve_coverage, title_relevance,
+    EXTRA_PORTALS, MIN_SHARED_CHUNKS, apply_manual_portals, build_sheet, derive_company, derive_keyword,
+    load_domain_map, resolve_coverage, title_overlap,
 )
 from report_pdf import build_pdf
 from article_meta import complete_truncated_titles, fetch_article_meta, normalize_url
@@ -203,7 +203,7 @@ with tab1:
         def _check_note(r):
             if r.get("확인필요"):
                 return "⚠ 본문 확인 필요"
-            if title_relevance(title, company, r["제목"]) < LOW_RELEVANCE:
+            if title_overlap(title, company, r["제목"]) < MIN_SHARED_CHUNKS:
                 return "⚠ 제목이 보도자료와 다름"
             return ""
 

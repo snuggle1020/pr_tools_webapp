@@ -69,7 +69,7 @@ def derive_keyword(title: str) -> str:
     return derive_company(title)
 
 
-LOW_RELEVANCE = 0.1  # 이 값 미만이면 앱에서 '⚠ 확인' 표시 (인터뷰·다른 소식일 가능성)
+MIN_SHARED_CHUNKS = 3  # 보도자료 제목과 겹치는 2글자 조각이 이보다 적으면 앱에서 '⚠ 제목이 보도자료와 다름' 표시
 
 
 def _bigrams(text: str) -> set:
@@ -77,13 +77,14 @@ def _bigrams(text: str) -> set:
     return {text[i:i + 2] for i in range(len(text) - 1)}
 
 
-def title_relevance(release_title: str, company: str, article_title: str) -> float:
-    """보도자료 제목(회사명 제외)의 2글자 묶음 중 기사 제목에도 있는 비율 (0~1).
+def title_overlap(release_title: str, company: str, article_title: str) -> int:
+    """보도자료 제목과 기사 제목(둘 다 회사명 제외)에 함께 있는 2글자 조각 수.
     같은 회사의 인터뷰·다른 소식처럼 회사명만 겹치는 기사를 골라내기 위한 참고값.
-    실측: 해당 보도자료 기사는 대부분 0.2 이상, 인터뷰·무관 기사는 0.05 이하."""
+    비율이 아닌 개수라 보도자료 제목이 길어도 기준이 흔들리지 않는다.
+    실측(4개 보도자료, 51건): 무관 기사는 0~2개, 해당 보도자료 기사는 대부분 3개 이상."""
     rel = _bigrams(release_title.replace(company, ""))
     art = _bigrams(article_title.replace(company, ""))
-    return len(rel & art) / len(rel) if rel else 1.0
+    return len(rel & art)
 
 
 def resolve_media_name(url: str, domain_map: dict):
