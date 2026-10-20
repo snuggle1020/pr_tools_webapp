@@ -26,6 +26,7 @@ def dump_work(title, dist_date, rows, included, extra, manual, company="") -> by
         "distribution_date": dist_date.isoformat(),
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "excluded_urls": [r["URL"] for r in rows if r["URL"] not in included_urls],
+        "naver_urls": [r["URL"] for r in rows],  # 저장 당시 확인한 네이버 기사 (포함/해제를 직접 정한 기사)
         "portals": {url: sorted(ps) for url, ps in extra.items() if ps},
         "manual": [
             {"매체명": m["매체명"], "제목": m["제목"], "URL": m["URL"],
@@ -45,6 +46,7 @@ def load_work(raw: bytes) -> dict:
         raise ValueError("작업 파일을 읽을 수 없습니다. '작업 저장'으로 받은 .json 파일인지 확인하세요.")
     data.setdefault("company", "")
     data.setdefault("excluded_urls", [])
+    data.setdefault("naver_urls", [])
     data.setdefault("portals", {})
     data.setdefault("manual", [])
     return data
@@ -52,11 +54,12 @@ def load_work(raw: bytes) -> dict:
 
 def restore_choices(saved, rows):
     """저장한 선택을 이번 검색 결과(rows)에 맞춰 돌려준다.
-    반환: (제외할 URL 집합, {URL: {"다음","구글"}}, 다음·구글 전용 기사 목록)
+    반환: (제외할 URL 집합, {URL: {"다음","구글"}}, 다음·구글 전용 기사 목록, 저장 당시 있던 URL 집합)
     저장 당시 다음·구글에서만 찾은 기사가 이번에는 네이버에서도 잡혔으면 중복 추가하지 않고
     그 네이버 기사의 다음·구글 노출로 합친다."""
     by_norm = {normalize_url(r["URL"]): r["URL"] for r in rows}
     excluded = {by_norm[n] for n in map(normalize_url, saved["excluded_urls"]) if n in by_norm}
+    known = {by_norm[n] for n in map(normalize_url, saved["naver_urls"] + saved["excluded_urls"]) if n in by_norm}
     portals = {}
     for url, ps in saved["portals"].items():
         if normalize_url(url) in by_norm:
@@ -72,4 +75,4 @@ def restore_choices(saved, rows):
             "게재일자": datetime.combine(date.fromisoformat(m["게재일"]), datetime.min.time()),
             "포털": set(m["포털"]), "note": "",
         })
-    return excluded, portals, manual
+    return excluded, portals, manual, known

@@ -165,8 +165,8 @@ with tab1:
                 st.session_state["report_run"] = run
                 saved_work = st.session_state.get("saved_work")
                 if saved_work and saved_work["title"] == title:
-                    excluded, portals, manual_saved = restore_choices(saved_work, rows)
-                    st.session_state["report"]["restore"] = {"excluded": excluded, "portals": portals}
+                    excluded, portals, manual_saved, known = restore_choices(saved_work, rows)
+                    st.session_state["report"]["restore"] = {"excluded": excluded, "portals": portals, "known": known}
                     st.session_state[f"fetched_{run}"] = {"matched": {}, "fetched": manual_saved, "n": 0}
 
     report = st.session_state.get("report")
@@ -195,6 +195,7 @@ with tab1:
         st.markdown("##### 기사 확인 및 다음·구글 반영")
         st.caption(
             "**⚠ 확인** 표시는 제목이 보도자료와 많이 달라 인터뷰·다른 소식일 수 있는 기사입니다. "
+            "**⚠ 본문 확인 필요** 기사는 처음에 **포함**이 해제돼 있으니, 넣을 기사만 체크하세요. "
             "보고서에서 뺄 기사는 **포함** 체크를 해제하세요. "
             "다음·구글은 자동 수집이 안 되니 직접 확인한 노출을 체크하면 PDF·엑셀에 바로 반영됩니다."
         )
@@ -207,13 +208,19 @@ with tab1:
             return ""
 
         notes = [_check_note(r) for r in rows]
-        restore = report.get("restore") or {"excluded": set(), "portals": {}}
+        restore = report.get("restore") or {"excluded": set(), "portals": {}, "known": set()}
+
+        def _default_include(r):
+            # 작업 파일에서 이미 포함/해제를 정한 기사는 그 선택대로, 처음 보는 기사는 '본문 확인 필요'면 해제 상태로 시작
+            if r["URL"] in restore.get("known", set()):
+                return r["URL"] not in restore["excluded"]
+            return not r.get("확인필요")
         if report.get("restore"):
             st.info("작업 파일의 선택(포함 해제·다음·구글 노출·직접 추가한 기사)을 적용했습니다. 새로 검색된 기사는 그대로 추가됐습니다.")
         order = range(len(rows))  # 보고서와 같은 순서 (포털 > 매체 영향력)
         flags = st.data_editor(
             pd.DataFrame(
-                [{"포함": rows[i]["URL"] not in restore["excluded"], "확인": notes[i],
+                [{"포함": _default_include(rows[i]), "확인": notes[i],
                   "매체명": rows[i]["매체명"], "제목": rows[i]["제목"], "게재일": rows[i]["게재일자"].date(),
                   "다음": "다음" in restore["portals"].get(rows[i]["URL"], ()),
                   "구글": "구글" in restore["portals"].get(rows[i]["URL"], ())} for i in order],
