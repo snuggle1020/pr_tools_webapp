@@ -35,6 +35,19 @@ from monthly_report import (
 
 REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
+@st.cache_data(show_spinner=False, max_entries=8)
+def _pdf_page_images(pdf_bytes: bytes):
+    """PDF 각 쪽을 PNG 이미지로 (앱 안 미리보기용)."""
+    import pypdfium2 as pdfium
+
+    pages = []
+    for page in pdfium.PdfDocument(pdf_bytes):
+        img = io.BytesIO()
+        page.render(scale=1.6).to_pil().save(img, "PNG")
+        pages.append(img.getvalue())
+    return pages
+
+
 st.set_page_config(page_title="오픈피알_PR 보고서", page_icon="📰", layout="wide")
 
 
@@ -339,7 +352,7 @@ with tab1:
 
         filename = f"결과보고서_{title}_{date.today():%Y%m%d}.xlsx"
         # on_click="ignore": 한쪽을 받아도 화면이 다시 그려지지 않아서 나머지 버튼이 유지됨
-        d1, d2, d3 = st.columns(3)
+        d1, d2, d3, d4 = st.columns(4)
         d1.download_button(
             "📑 PDF 보고서 다운로드",
             data=pdf_bytes,
@@ -366,6 +379,18 @@ with tab1:
             on_click="ignore",
             help="내일 이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
         )
+        preview_open = st.session_state.get("pdf_preview_open", False)
+        if d4.button("🙈 미리보기 닫기" if preview_open else "👁 PDF 미리보기", width="stretch", key="pdf_preview_btn"):
+            st.session_state["pdf_preview_open"] = not preview_open
+            st.rerun()
+        if preview_open:
+            with st.container(border=True):
+                with st.spinner("미리보기 만드는 중..."):
+                    pages = _pdf_page_images(pdf_bytes)
+                st.caption(f"PDF 미리보기 · {len(pages)}쪽 — 위에서 체크·입력을 바꾸면 바로 반영됩니다.")
+                _, mid, _ = st.columns([1, 6, 1])
+                for img in pages:
+                    mid.image(img, width="stretch")
 
 # ------------------------------------------------------------------
 # 탭 2: 월간 PR리포트
