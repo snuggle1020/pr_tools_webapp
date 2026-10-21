@@ -29,9 +29,6 @@ BG = HexColor("#F4F6F9")
 ORANGE = HexColor("#D9822B")
 RED = HexColor("#C2410C")
 FAINT = HexColor("#9AA1AE")
-RELEASE_COLORS = [(BLUE, HexColor("#E8EEFC")), (GREEN, HexColor("#E3F4ED")),
-                  (ORANGE, HexColor("#FBEEDF")), (HexColor("#7A4FD1"), HexColor("#EFE9FB"))]
-OTHER_COLOR = (SUBTITLE, BG)
 BOTTOM_Y = PAGE_H - 46
 PURPLE = HexColor("#7A4FD1")
 # 월별 추이 막대: 아래에서부터 쌓는 순서 (키, 범례 이름, 색)
@@ -338,7 +335,7 @@ def _draw_releases(doc, dates):
         h = 16 + 17 * max(len(w) for w in wrapped) + 40
         for j, (r, lines) in enumerate(zip(pair, wrapped)):
             k = i + j
-            color = RELEASE_COLORS[k % len(RELEASE_COLORS)][0]
+            color = BLUE  # 보도자료 카드는 한 가지 색
             x = X0 + j * (cw + gap)
             p.rect(x, top, cw, h, fill=WHITE, stroke=LINE, r=8)
             p.rect(x, top, 4, h, fill=color)
@@ -423,7 +420,7 @@ def _draw_types_and_trend(doc):
 
 def _table(doc, cols, rows, x=X0, w=W, font_size=9, lead=13):
     """cols: [(머리글, 폭, 정렬)] - 폭 None 은 남는 폭.
-    rows: {'cells': [(글, 폰트, 색)], 'link': (칸 번호, url)} 또는 {'group': 이름, 'count': n, 'color', 'bg'}.
+    rows: {'cells': [(글, 폰트, 색)], 'link': (칸 번호, url)}.
     페이지를 넘기면 머리글을 다시 그린다."""
     p = doc.p
     fixed = sum(c[1] for c in cols if c[1])
@@ -439,16 +436,6 @@ def _table(doc, cols, rows, x=X0, w=W, font_size=9, lead=13):
 
     head()
     for r in rows:
-        if "group" in r:
-            h = 24
-            if doc.top + h + 26 > BOTTOM_Y:
-                doc.new_page()
-                head()
-            p.rect(x, doc.top, w, h, fill=r["bg"])
-            p.text(x + 8, doc.top + 7, r["group"], font=BOLD, size=9.8)
-            p.text(x + w - 8, doc.top + 7, f"{r['count']}건", font=BOLD, size=9.8, color=r["color"], align="right")
-            doc.top += h
-            continue
         wrapped = []
         for (txt, font, _), cw in zip(r["cells"], widths):
             wrapped.append(_wrap(str(txt), font, font_size, cw - 14))
@@ -500,7 +487,7 @@ def _draw_meetings_and_plans(doc):
     doc.section(5, d["plan_title"], x=x, w=w)
     doc.top = start2 + 26
     if d["plans"]:
-        rows = [{"cells": [(a, SEMI, BLUE), (b, SEMI, INK), (c, REG, INK)]} for a, b, c in d["plans"]]
+        rows = [{"cells": [(a, SEMI, INK), (b, SEMI, INK), (c, REG, INK)]} for a, b, c in d["plans"]]
         _table(doc, [("형식", 54, "left"), ("내용", None, "left"), ("진행 상황", 86, "left")], rows, x=x, w=w)
     else:
         doc.p.text(x, doc.top, "등록된 목표가 없습니다.", size=9.5, color=MUTED)
@@ -509,31 +496,16 @@ def _draw_meetings_and_plans(doc):
 
 
 def _draw_articles(doc, dates):
-    d = doc.data
-    rels = d["releases"]
-    arts = d["articles"]
-    groups = [[] for _ in rels] + [[]]
-    for a in arts:
-        k = assign_release(a, dates)
-        groups[len(rels) if k is None else k].append(a)
-
-    doc.section(6, "주요 기사 리스트", f"전체 {len(arts)}건 · 제목을 누르면 기사로 이동")
+    """기사 전체를 게재일·매체 순으로 한 표에 (보도자료별 묶음 줄 없이)"""
+    arts = doc.data["articles"]
+    doc.section(6, "주요 기사 리스트", "제목을 누르면 기사로 이동")
     doc.top += 26
-    rows, no = [], 0
-    only_other = not rels
-    for k, g in enumerate(groups):
-        if not g:
-            continue
-        if not only_other:
-            color, bg = RELEASE_COLORS[k % len(RELEASE_COLORS)] if k < len(rels) else OTHER_COLOR
-            name = f"보도자료 {k + 1} · {rels[k]['title']}" if k < len(rels) else "기획·기타 기사"
-            rows.append({"group": name, "count": len(g), "color": color, "bg": bg})
-        for a in g:
-            no += 1
-            dt = f"{a['date'].month}.{a['date'].day}" if a["date"] else ""
-            rows.append({"cells": [(no, REG, MUTED), (a["media"], SEMI, INK), (a["title"], REG, INK),
-                                   (dt, REG, MUTED), (a["kind"] or "-", MED, MUTED)],
-                         "link": (2, a["url"])})
+    rows = []
+    for no, a in enumerate(arts, 1):
+        dt = f"{a['date'].month}.{a['date'].day}" if a["date"] else ""
+        rows.append({"cells": [(no, REG, MUTED), (a["media"], SEMI, INK), (a["title"], REG, INK),
+                               (dt, REG, MUTED), (a["kind"] or "-", MED, MUTED)],
+                     "link": (2, a["url"])})
     if not arts:
         doc.p.text(X0, doc.top, "정리된 기사가 없습니다.", size=9.5, color=MUTED)
         doc.top += 16
@@ -554,10 +526,10 @@ def _draw_mentions(doc):
         doc.p.text(X0, doc.top, "이번 달 단순 언급 기사가 없습니다.", size=9.5, color=MUTED)
         doc.top += 16
         return
-    rows = [{"cells": [(i, REG, MUTED), (m["title"], SEMI, INK), (m["media"], REG, INK), (f"{m['count']}건", BOLD, BLUE)],
+    rows = [{"cells": [(i, REG, MUTED), (m["title"], SEMI, INK), (m["media"], REG, INK), (f"{m['count']}건", MED, INK)],
              "link": (1, m["url"])} for i, m in enumerate(ms, 1)]
-    _table(doc, [("No", 28, "center"), ("주제 (대표 기사)", None, "left"), ("대표 매체", 90, "left"),
-                 ("관련 기사", 64, "center")], rows, font_size=9.5, lead=14)
+    _table(doc, [("No", 28, "center"), ("주제 (대표 기사)", None, "left"), ("대표 매체", 84, "left"),
+                 ("관련 기사", 54, "center")], rows)  # 위 기사 표와 같은 글자 크기·칸 너비
     doc.top += 8
     doc.p.text(X0, doc.top, "* 단순 언급: 본문에 함께 언급된 기사. 같은 주제의 기사는 하나로 묶어 대표 기사와 관련 기사 수로 표시",
                size=8.3, color=MUTED)
