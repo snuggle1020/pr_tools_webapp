@@ -592,7 +592,7 @@ def _draw_mentions(doc):
         doc.p.text(X0, doc.top, "이번 달 단순 언급 기사가 없습니다.", size=9.5, color=MUTED)
         doc.top += 16
         return
-    rows = [{"cells": [(i, REG, MUTED), (m["title"], SEMI, INK), (m["media"], REG, INK), (f"{m['count']}건", MED, INK)],
+    rows = [{"cells": [(i, REG, MUTED), (m["title"], REG, INK), (m["media"], REG, INK), (f"{m['count']}건", MED, INK)],
              "link": (1, m["url"])} for i, m in enumerate(ms, 1)]
     _table(doc, [("No", 28, "center"), ("제목", None, "left"), ("대표 매체", 84, "left"),
                  ("관련 기사", 54, "center")], rows)  # 위 기사 표와 같은 글자 크기·칸 너비
