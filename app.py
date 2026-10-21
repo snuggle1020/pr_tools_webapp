@@ -27,7 +27,7 @@ from article_meta import complete_truncated_titles, fetch_article_meta, normaliz
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
-from monthly_pdf import TYPE_ORDER, _to_date, assign_release, build_monthly_pdf, default_summary, read_history
+from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf, default_summary, read_history
 from monthly_report import (
     KIND_OPTIONS, auto_group_mentions, auto_mark_releases, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
@@ -543,27 +543,25 @@ with tab2:
 
         # ① 보도자료
         st.markdown("##### ① 이번 달 배포한 보도자료")
-        st.caption("보도자료 기사가 몰린 날짜로 미리 채웠습니다. 제목·배포일을 확인하고, 빠졌거나 틀린 건은 행을 추가·삭제하세요. "
+        st.caption("보도자료 기사가 몰린 날짜로 미리 채웠습니다. 제목·배포일을 확인하고 고치세요. 빠진 건은 추가, 틀린 건은 삭제하세요. "
                    "형식이 '보도자료'인 기사는 배포일 기준으로 각 보도자료에 자동으로 묶입니다.")
-        rel_src = pd.DataFrame([{"제목": r["title"], "배포일": r["date"]} for r in M["releases"]],
-                               columns=["제목", "배포일"]).astype({"제목": "str"})
-        # 빈 표로 시작하면 배포일 칸이 글자형이 돼서, 새로 넣은 날짜가 문자열로 돌아옴 -> 처음부터 날짜형으로
-        rel_src["배포일"] = pd.to_datetime(rel_src["배포일"], errors="coerce")
-        rel_df = st.data_editor(
-            rel_src,
-            num_rows="dynamic", hide_index=True, width="stretch", key=f"m_rel_{run}",
-            column_config={"제목": st.column_config.TextColumn("보도자료 제목", width="large"),
-                           "배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD")},
-        )
-        releases = []
-        for _, r in rel_df.iterrows():
-            t = "" if pd.isna(r["제목"]) else str(r["제목"]).strip()
-            if not t or t in ("None", "nan"):
-                continue
-            d = r["배포일"]
-            d = None if d is None or pd.isna(d) else d.date() if isinstance(d, datetime) else d if isinstance(d, date) \
-                else _to_date(d)
-            releases.append({"title": t, "date": d})
+        # 표(data_editor) 칸에서는 한글 입력이 Enter 때 날아가는 일이 있어서, 보도자료는 줄마다 일반 입력칸으로 받음
+        rows_key = f"m_rel_rows_{run}"
+        if rows_key not in st.session_state:
+            st.session_state[rows_key] = [{"id": i, "title": r["title"], "date": r["date"]}
+                                          for i, r in enumerate(M["releases"])]
+        rel_rows = st.session_state[rows_key]
+        for r in rel_rows:
+            c1, c2, c3 = st.columns([7, 2, 1], vertical_alignment="bottom")
+            r["title"] = c1.text_input("보도자료 제목", value=r["title"], key=f"m_rel_t_{run}_{r['id']}")
+            r["date"] = c2.date_input("배포일", value=r["date"], format="YYYY-MM-DD", key=f"m_rel_d_{run}_{r['id']}")
+            if c3.button("삭제", key=f"m_rel_x_{run}_{r['id']}", width="stretch"):
+                st.session_state[rows_key] = [x for x in rel_rows if x["id"] != r["id"]]
+                st.rerun()
+        if st.button("➕ 보도자료 추가", key=f"m_rel_add_{run}"):
+            rel_rows.append({"id": max((x["id"] for x in rel_rows), default=-1) + 1, "title": "", "date": None})
+            st.rerun()
+        releases = [{"title": r["title"].strip(), "date": r["date"]} for r in rel_rows if r["title"].strip()]
         releases.sort(key=lambda r: r["date"] or date.max)
         if any(r["date"] is None for r in releases):
             st.warning("배포일이 비어 있는 보도자료가 있습니다. 배포일을 넣어야 그 보도자료 기사가 묶여서 게재 수가 셉니다.")
