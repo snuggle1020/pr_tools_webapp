@@ -234,9 +234,8 @@ class _Doc:
         x = p.text(X0, TOP, d["company"], font=BOLD, size=size)
         p.text(x + 7, TOP, f"{d['month']}월 PR 리포트{sub}", font=MED, size=size, color=SUBTITLE)
         last = (date(d["year"], d["month"] % 12 + 1, 1) if d["month"] < 12 else date(d["year"] + 1, 1, 1)) - timedelta(days=1)
-        p.text(X0 + W, TOP + (size - 18) + 1, f"집계 기간 {d['year']}.{d['month']}.1 – {d['month']}.{last.day}",
+        p.text(X0 + W, TOP + size - 10, f"집계 기간 {d['year']}.{d['month']}.1 – {d['month']}.{last.day}",
                size=8.8, color=MUTED, align="right")
-        p.text(X0 + W, TOP + (size - 18) + 14, "오픈피알 작성", size=8.8, color=MUTED, align="right")
         t = TOP + size + 10
         p.hline(X0, t, W, color=INK, lw=2)
         self.top = t + 16
@@ -270,21 +269,17 @@ def _draw_kpis(doc):
     p, d = doc.p, doc.data
     total = sum(d["types"].values())
     tr = d["trend"]
-    cells = [(str(total), "건", "이번 달 총 보도", BLUE)]
+    cells = [(str(total), "건", "이번 달 총 보도 건수", BLUE)]
     if tr and d["month"] > 1:
         i = d["month"] - 2
         prev = tr["release"][i] + tr["planned"][i] + tr["mention"][i]
         diff = total - prev
-        cells.append((f"{'+' if diff >= 0 else '−'}{abs(diff)}", "건", f"전월 대비 ({d['month'] - 1}월 {prev}건)",
+        cells.append((f"{'+' if diff >= 0 else '−'}{abs(diff)}", "건", "전월 대비 증감",
                       GREEN if diff >= 0 else RED))
-    if d["releases"]:
-        cells.append((str(len(d["releases"])), "건 배포", f"보도자료 → 게재 {sum(r['count'] for r in d['releases'])}건", INK))
-    else:
-        planned = sum(d["types"][k] for k in ("인터뷰", "기고", "기획(오픈피알)", "기획(외부)"))
-        cells.append((str(planned), "건", "기획·인터뷰·기고 기사", INK))
+    cells.append((str(len(d["releases"])), "건", "보도자료 배포 건수", INK))
     if tr:
         ytd = sum(tr["release"][i] + tr["planned"][i] + tr["mention"][i] for i in range(d["month"]))
-        cells.append((str(ytd), "건", f"연간 누적 (1–{d['month']}월)", INK))
+        cells.append((str(ytd), "건", "연간 누적 건수", INK))
 
     top, h = doc.top, 66
     p.rect(X0, top, W, h, fill=WHITE, stroke=LINE, r=9)
@@ -319,10 +314,8 @@ def _draw_summary(doc, text):
 def _draw_releases(doc, dates):
     p, d = doc.p, doc.data
     rels = d["releases"]
-    total = sum(r["count"] for r in rels)
     doc.top += 14
-    note = f"보도자료 {len(rels)}건 · 게재 {total}건" if rels else ""
-    top = doc.section(1, "보도자료별 게재 현황", note)
+    top = doc.section(1, "보도자료별 게재 현황")
     if not rels:
         p.rect(X0, top, W, 40, fill=BG, r=8)
         p.text(X0 + 16, top + 14, "이번 달 배포한 보도자료가 없습니다.", size=10, color=MUTED)
@@ -333,15 +326,14 @@ def _draw_releases(doc, dates):
     for i in range(0, len(rels), 2):
         pair = rels[i:i + 2]
         wrapped = [_clip_lines(_wrap(r["title"], BOLD, 11.5, cw - 34), BOLD, 11.5, cw - 34, 2) for r in pair]
-        h = 22 + 17 * max(len(w) for w in wrapped) + 40
+        h = 16 + 17 * max(len(w) for w in wrapped) + 40
         for j, (r, lines) in enumerate(zip(pair, wrapped)):
             k = i + j
             color = RELEASE_COLORS[k % len(RELEASE_COLORS)][0]
             x = X0 + j * (cw + gap)
             p.rect(x, top, cw, h, fill=WHITE, stroke=LINE, r=8)
             p.rect(x, top, 4, h, fill=color)
-            p.text(x + 16, top + 12, f"보도자료 {k + 1}", font=SEMI, size=8.8, color=color)
-            t = top + 27
+            t = top + 16
             for line in lines:
                 p.text(x + 16, t, line, font=BOLD, size=11.5)
                 t += 17
