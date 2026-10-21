@@ -14,7 +14,7 @@
 import io
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from reportlab.lib.colors import HexColor
@@ -539,14 +539,16 @@ def _draw_footer(p, top, portals):
 
 def build_pdf(title, company, distribution_date, rows, window_days=3, generated_on=None):
     """rows: report_sheet.resolve_coverage()가 반환한 리스트. 반환값: PDF bytes.
-    (window_days / generated_on 은 이전 호출부 호환용)"""
+    집계일: 배포일 ~ 보고서를 만드는 날(한국 시간). 단 수집 기간(배포일+window_days)을 넘지 않는다.
+    generated_on: 보고서 만드는 날 (테스트용, 기본값은 오늘)"""
     _register_fonts()
     dist_dt = datetime.strptime(distribution_date, "%Y-%m-%d").date()
     arts = _prepare(rows)
     for i, a in enumerate(arts, start=1):
         a["no"] = i
 
-    last = max((a["dt"].date() for a in arts), default=dist_dt)
+    today = generated_on or datetime.now(timezone(timedelta(hours=9))).date()  # 서버(UTC)가 아닌 한국 날짜
+    period_end = max(dist_dt, min(today, dist_dt + timedelta(days=window_days)))
 
     total = len(arts)
     kpis = [
@@ -563,7 +565,7 @@ def build_pdf(title, company, distribution_date, rows, window_days=3, generated_
     c.setAuthor("오픈피알")
     p = _Page(c)
 
-    top = _draw_header(p, company, title, dist_dt, max(last, dist_dt))
+    top = _draw_header(p, company, title, dist_dt, period_end)
     top = _draw_summary_card(p, top, arts, kpis)
     page_bottom = PAGE_H - 28  # 1쪽은 꼬리말이 없어 여백을 좁게
     # 주요 매체 기사 4건(전체 제목)과 막대 카드가 1쪽에 같이 안 들어가면 막대 카드를 2쪽 맨 위로 넘김
