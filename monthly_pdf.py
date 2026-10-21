@@ -596,9 +596,6 @@ def _draw_mentions(doc):
              "link": (1, m["url"])} for i, m in enumerate(ms, 1)]
     _table(doc, [("No", 28, "center"), ("제목", None, "left"), ("대표 매체", 84, "left"),
                  ("관련 기사", 54, "center")], rows)  # 위 기사 표와 같은 글자 크기·칸 너비
-    doc.top += 8
-    doc.p.text(X0, doc.top, "* 단순 언급: 본문에 함께 언급된 기사. 같은 주제의 기사는 하나로 묶어 대표 기사와 관련 기사 수로 표시",
-               size=8.3, color=MUTED)
 
 
 HISTORY_PREFIX = "prhist:"
