@@ -28,7 +28,6 @@ from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
 from monthly_pdf import TYPE_ORDER, _to_date, assign_release, build_monthly_pdf, default_summary, read_history
-from ai_summary import write_summary as write_ai_summary
 from monthly_report import (
     KIND_OPTIONS, auto_group_mentions, auto_mark_releases, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
@@ -68,19 +67,6 @@ def _load_naver_credentials():
 
 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET = _load_naver_credentials()
 
-
-def _load_anthropic_key():
-    """월간 리포트 AI 요약용 Claude API 키 (Secrets 의 ANTHROPIC_API_KEY -> 환경변수)."""
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return True
-    try:
-        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-        return True
-    except Exception:
-        return False
-
-
-ANTHROPIC_READY = _load_anthropic_key()
 
 st.title("📰 PR 보고서 생성기")
 
@@ -680,25 +666,20 @@ with tab2:
 
         # ⑤ 요약
         st.markdown("##### ⑤ 이달의 요약")
-        s_key = f"m_summary_{run}"
-        ai_col, ai_note = st.columns([1, 3])
-        if ai_col.button("✨ AI 요약 만들기", key=f"m_ai_{run}", width="stretch",
-                         disabled=not ANTHROPIC_READY,
-                         help="위 표의 기사·보도자료·단순언급 묶음을 보고 이달 보도의 특징을 3~4문장으로 씁니다. 1~2분 걸릴 수 있습니다."):
-            with st.spinner("Claude가 이달 보도의 특징을 정리하는 중..."):
-                try:
-                    st.session_state[s_key] = write_ai_summary(mdata, rel_dates, articles)
-                    st.session_state["m_ai_msg"] = None
-                except RuntimeError as e:
-                    st.session_state["m_ai_msg"] = str(e)
+        s_key, auto_key = f"m_summary_{run}", f"m_summary_auto_{run}"
+        auto_text = default_summary(mdata, rel_dates)
+        # 아직 손대지 않았으면(자동 문장 그대로면) 표를 고칠 때마다 자동 문장도 새로 맞춤. 직접 고친 뒤에는 건드리지 않음
+        if s_key not in st.session_state:
+            st.session_state[s_key] = M["summary"] if M["summary"] is not None else auto_text
+        elif st.session_state[s_key] == st.session_state.get(auto_key):
+            st.session_state[s_key] = auto_text
+        st.session_state[auto_key] = auto_text
+        if st.button("↺ 자동 문장으로 다시 채우기", key=f"m_sum_reset_{run}",
+                     help="표 내용(보도자료·매체 유형·단순 언급 묶음·전월 대비)으로 만든 문장으로 되돌립니다."):
+            st.session_state[s_key] = auto_text
             st.rerun()
-        ai_note.caption("AI 요약은 초안입니다. 사실과 다른 내용이 없는지 읽어 보고 고쳐서 쓰세요."
-                        if ANTHROPIC_READY else "AI 요약을 쓰려면 Streamlit Secrets에 ANTHROPIC_API_KEY를 넣어 주세요.")
-        if st.session_state.get("m_ai_msg"):
-            st.error(st.session_state["m_ai_msg"])
-        if s_key not in st.session_state:  # 첫 화면은 저장해 둔 요약 또는 숫자로 만든 기본 문장 (AI 요약은 위 버튼이 이 칸을 덮어씀)
-            st.session_state[s_key] = M["summary"] if M["summary"] is not None else default_summary(mdata)
-        summary_text = st.text_area("PDF 1쪽에 들어갑니다 (비우면 빠짐)", height=130, key=s_key)
+        summary_text = st.text_area(
+            "PDF 1쪽에 들어갑니다 · 표 내용으로 자동으로 쓴 초안이니 자유롭게 고치세요 (비우면 빠짐)", height=130, key=s_key)
 
         if add_go:  # 지금까지 고친 내용을 저장한 뒤 기사를 붙이고 표를 다시 그림
             urls = [u.rstrip(".,)") for u in re.findall(r"https?://[^\s<>\"']+", add_text or "")]

@@ -20,6 +20,8 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as rl_canvas
 
+from media_order import media_category
+
 from report_pdf import (
     BOLD, MED, REG, SEMI, INK, MUTED, SUBTITLE, LINE, BLUE, GREEN, GRAY, WHITE, WEEKDAYS,
     PAGE_H, X0, W, TOP, _Page, _register_fonts, _sw, _wrap, _clip_lines,
@@ -209,19 +211,84 @@ def guess_release_dates(data):
     return top + [first] * (n - len(top))
 
 
-def default_summary(data):
+def _clip(text, n):
+    text = re.sub(r"\s+", " ", text or "").strip()
+    return text if len(text) <= n else text[:n].rstrip(" ,·…") + "…"
+
+
+def _topic_label(title):
+    """단순 언급 주제를 짧게: 제목의 따옴표 속 핵심어와 맨 앞 회사명('LX판토스, ...')을 뽑는다.
+    예) "LX판토스, ‘로봇 물류센터’ 만든다…" -> LX판토스 ‘로봇 물류센터’ / "전통시장서 …'AI 관광집사'가 …" -> ‘AI 관광집사’"""
+    t = re.sub(r"\[[^\]]*\]", "", title or "").strip()
+    quoted = re.search(r"[‘'\"“]([^’'\"”]{2,20})[’'\"”]", t)
+    subject = re.match(r"([^\s,·…]{2,15}),", t)
+    if quoted and subject:
+        return f"{subject.group(1)} ‘{quoted.group(1)}’"
+    if quoted:
+        return f"‘{quoted.group(1)}’"
+    if subject:
+        return subject.group(1)
+    return f"‘{_clip(t, 20)}’"
+
+
+def default_summary(data, release_dates=None):
+    """이달의 요약 기본 문장 (규칙으로 만든 초안, 앱에서 담당자가 고쳐 씀).
+    ① 보도를 이끈 보도자료 ② 게재 매체 유형 ③ 단순 언급이 나온 주요 소식 ④ 전월 대비·기획 기사 유무."""
+    m = data["month"]
     total = sum(data["types"].values())
+    rels, dates = data["releases"], list(release_dates or [])
     parts = []
-    if data["releases"]:
-        parts.append(f"보도자료 {len(data['releases'])}건을 배포해 총 {total}건이 보도됐습니다.")
+
+    # ① 보도를 이끈 것
+    if rels:
+        k, top = max(enumerate(rels), key=lambda x: x[1]["count"])
+        d = dates[k] if k < len(dates) else None
+        same_day = sum(1 for a in data["articles"] if d and a["date"] == d and assign_release(a, dates) == k)
+        title = _clip(top["title"], 32)
+        if len(rels) == 1:
+            if d and same_day and same_day < top["count"]:
+                how = f"배포 당일 {same_day}건을 포함해 {top['count']}건 게재되며"
+            elif d and same_day:
+                how = f"배포 당일 {top['count']}건 게재되며"
+            else:
+                how = f"{top['count']}건 게재되며"
+            parts.append(f"{m}월은 ‘{title}’ 보도자료 {how} 보도를 이끌었습니다.")
+        else:
+            parts.append(f"{m}월은 보도자료 {len(rels)}건으로 {sum(r['count'] for r in rels)}건이 게재됐고, "
+                         f"그중 ‘{title}’이(가) {top['count']}건으로 가장 많이 실렸습니다.")
     else:
-        parts.append(f"이번 달은 보도자료 배포 없이 총 {total}건이 보도됐습니다.")
+        parts.append(f"{m}월은 보도자료 배포 없이 총 {total}건이 보도됐습니다.")
+
+    # ② 게재 매체 유형
+    cats = Counter(media_category(a["media"]) for a in data["articles"]).most_common()
+    if len(data["articles"]) < 3:  # 기사가 몇 건 안 되면 매체 유형 이야기는 뺌
+        pass
+    elif len(cats) == 1:
+        parts.append(f"게재 매체는 {cats[0][0]}({cats[0][1]}건)이었습니다.")
+    elif cats:
+        others = "·".join(c for c, _ in cats[1:4])
+        parts.append(f"게재 매체는 {cats[0][0]}({cats[0][1]}건) 중심으로 {others}에도 실렸습니다.")
+
+    # ③ 단순 언급 맥락
+    big = [mn for mn in data["mentions"] if mn["count"] >= 2][:2]
+    if big:
+        topics = ", ".join(f"{_topic_label(mn['title'])}({mn['count']}건)" for mn in big)
+        parts.append(f"단순 언급은 {topics} 소식에서 함께 거론됐습니다.")
+    elif data["mentions"]:
+        parts.append(f"단순 언급은 {data['types'].get('단순언급', 0)}건으로, 여러 소식에서 개별적으로 거론됐습니다.")
+
+    # ④ 전월 대비 · 기획 기사
+    planned = sum(data["types"].get(k, 0) for k in PLANNED_TYPES)
+    plan_txt = "기획·인터뷰 기사는 없었습니다" if not planned else f"기획·인터뷰 기사도 {planned}건 실렸습니다"
     tr = data["trend"]
-    if tr and data["month"] > 1:
-        i = data["month"] - 2
+    if tr and m > 1:
+        i = m - 2
         prev = tr["release"][i] + tr["planned"][i] + tr["mention"][i]
-        d = total - prev
-        parts.append(f"전월({prev}건) 대비 {abs(d)}건 {'증가' if d >= 0 else '감소'}했습니다.")
+        diff = total - prev
+        change = f"{abs(diff)}건 늘었" if diff > 0 else f"{abs(diff)}건 줄었" if diff < 0 else "같은 수준이었"
+        parts.append(f"전월({prev}건) 대비 {change}으며, {plan_txt}.")
+    else:
+        parts.append(f"{plan_txt}.")
     return " ".join(parts)
 
 
