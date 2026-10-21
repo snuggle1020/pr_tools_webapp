@@ -186,10 +186,19 @@ def dedupe_by_url(items):
 
 
 def fetch_month_articles(keyword, year, month, client_id, client_secret):
-    """네이버에서 수집 -> 해당 월 필터 -> URL 중복제거 -> 매체 계산 -> 날짜우선/매체순 정렬"""
-    raw = fetch_all_naver(keyword, client_id, client_secret)
+    """네이버에서 수집 -> 해당 월 필터 -> URL 중복제거 -> 키워드 정확 일치만 -> 매체 계산 -> 날짜우선/매체순 정렬.
+    네이버는 '한국딥러닝'을 '한국'+'딥러닝'으로 쪼개 검색해서 무관한 기사가 대부분 섞임 (10월 261건 중 234건).
+    그래서 따옴표로 묶어 정확히 일치하는 기사만 검색하고, 제목·요약에 키워드가 한 단어로 들어간 기사만 남긴다
+    ('딥파인스'처럼 키워드를 품은 다른 이름은 제외)."""
+    from naver_news import _contains_word  # 결과보고서·기사 수집 탭과 같은 판정
+
+    keyword = keyword.strip().strip('"')
+    raw = fetch_all_naver(f'"{keyword}"', client_id, client_secret)
     filtered = filter_by_month(raw, year, month)
     filtered = dedupe_by_url(filtered)
+    filtered = [it for it in filtered
+                if _contains_word(clean_html(it.get("title")), keyword)
+                or _contains_word(clean_html(it.get("description")), keyword)]
     for it in filtered:
         it["_media"] = media_from_link(it.get("originallink") or it.get("link"))
     filtered.sort(key=lambda x: (x["_dt"].date(), media_sort_key(x["_media"]), x["_dt"]))
