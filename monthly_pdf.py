@@ -284,11 +284,11 @@ def _draw_kpis(doc):
     top, h = doc.top, 66
     p.rect(X0, top, W, h, fill=WHITE, stroke=LINE, r=9)
     cw = W / len(cells)
-    for i, (num, unit, label, color) in enumerate(cells):
-        cx = X0 + i * cw + 16
-        x = p.text(cx, top + 13, num, font=BOLD, size=25, color=color)
+    for i, (num, unit, label, color) in enumerate(cells):  # 숫자+단위 묶음과 설명을 칸 가운데에
+        mid = X0 + i * cw + cw / 2
+        x = p.text(mid - (_sw(num, BOLD, 25) + 2 + _sw(unit, SEMI, 10.5)) / 2, top + 13, num, font=BOLD, size=25, color=color)
         p.text(x + 2, top + 24, unit, font=SEMI, size=10.5, color=MUTED)
-        p.text(cx, top + 45, label, font=MED, size=9.5, color=MUTED)
+        p.text(mid, top + 45, label, font=MED, size=9.5, color=MUTED, align="center")
         if i:
             p.vline(X0 + i * cw, top, h)
     doc.top = top + h + 12
