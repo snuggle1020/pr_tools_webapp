@@ -604,10 +604,13 @@ with tab2:
                 "date": d if isinstance(d, date) and not pd.isna(d) else a["date"],
             })
 
-        with st.expander("➕ 네이버에 없는 기사 추가 (다음·구글 등에서 찾은 기사)"):
-            add_text = st.text_area("기사 링크 (한 줄에 하나씩)", key=f"m_add_urls_{run}", height=100,
-                                    placeholder="https://www.example.co.kr/news/...")
-            add_go = st.button("기사 정보 불러와서 추가", key=f"m_add_btn_{run}")
+        # ②-1 네이버에 없는 기사 (접지 않고 항상 보이게)
+        st.markdown("##### ②-1 네이버에 없는 기사 추가")
+        st.caption("다음·구글 등에서 찾은 기사 링크를 한 줄에 하나씩 붙여 넣고 버튼을 누르면 매체·제목·게재일을 읽어 위 표에 추가합니다. "
+                   "형식·단순언급 묶음도 같은 기준으로 자동으로 정리됩니다.")
+        add_text = st.text_area("기사 링크 (한 줄에 하나씩)", key=f"m_add_urls_{run}", height=100,
+                                placeholder="https://www.example.co.kr/news/...")
+        add_go = st.button("➕ 기사 정보 불러와서 추가", key=f"m_add_btn_{run}")
 
         # ③ 미팅·목표
         st.markdown("##### ③ 기자 미팅 · 다음 달 목표")
