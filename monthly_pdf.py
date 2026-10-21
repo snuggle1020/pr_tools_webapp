@@ -519,8 +519,7 @@ def _draw_mentions(doc):
     ms = d["mentions"]
     doc.top += 24
     doc.ensure(26 + 22 + 30)
-    total = sum(m["count"] for m in ms)
-    doc.section(7, "단순 언급 기사", f"주제 {len(ms)}개 · 관련 기사 {total}건" if ms else "")
+    doc.section(7, "단순 언급 기사")
     doc.top += 26
     if not ms:
         doc.p.text(X0, doc.top, "이번 달 단순 언급 기사가 없습니다.", size=9.5, color=MUTED)
@@ -528,7 +527,7 @@ def _draw_mentions(doc):
         return
     rows = [{"cells": [(i, REG, MUTED), (m["title"], SEMI, INK), (m["media"], REG, INK), (f"{m['count']}건", MED, INK)],
              "link": (1, m["url"])} for i, m in enumerate(ms, 1)]
-    _table(doc, [("No", 28, "center"), ("주제 (대표 기사)", None, "left"), ("대표 매체", 84, "left"),
+    _table(doc, [("No", 28, "center"), ("제목", None, "left"), ("대표 매체", 84, "left"),
                  ("관련 기사", 54, "center")], rows)  # 위 기사 표와 같은 글자 크기·칸 너비
     doc.top += 8
     doc.p.text(X0, doc.top, "* 단순 언급: 본문에 함께 언급된 기사. 같은 주제의 기사는 하나로 묶어 대표 기사와 관련 기사 수로 표시",
