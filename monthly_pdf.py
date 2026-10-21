@@ -236,13 +236,14 @@ class _Doc:
         self.page_no = 1
         self.top = TOP
 
-    def header(self, sub=""):
+    def header(self):
+        """모든 쪽 같은 머리글: 기업명 / N월 PR 리포트 + 오른쪽 분석 기간"""
         p, d = self.p, self.data
-        size = 22 if not sub else 17
+        size = 22
         x = p.text(X0, TOP, d["company"], font=BOLD, size=size)
-        p.text(x + 7, TOP, f"{d['month']}월 PR 리포트{sub}", font=MED, size=size, color=SUBTITLE)
+        p.text(x + 7, TOP, f"{d['month']}월 PR 리포트", font=MED, size=size, color=SUBTITLE)
         last = (date(d["year"], d["month"] % 12 + 1, 1) if d["month"] < 12 else date(d["year"] + 1, 1, 1)) - timedelta(days=1)
-        p.text(X0 + W, TOP + size - 10, f"집계 기간 {d['year']}.{d['month']}.1 – {d['month']}.{last.day}",
+        p.text(X0 + W, TOP + size - 10, f"분석 기간 {d['year']}.{d['month']}.1 – {d['month']}.{last.day}",
                size=8.8, color=MUTED, align="right")
         t = TOP + size + 10
         p.hline(X0, t, W, color=INK, lw=2)
@@ -258,7 +259,7 @@ class _Doc:
         self.footer()
         self.c.showPage()
         self.page_no += 1
-        self.header(" · 게재 기사")
+        self.header()
 
     def ensure(self, h):
         if self.top + h > BOTTOM_Y:
