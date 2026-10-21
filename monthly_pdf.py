@@ -32,7 +32,11 @@ FAINT = HexColor("#9AA1AE")
 RELEASE_COLORS = [(BLUE, HexColor("#E8EEFC")), (GREEN, HexColor("#E3F4ED")),
                   (ORANGE, HexColor("#FBEEDF")), (HexColor("#7A4FD1"), HexColor("#EFE9FB"))]
 OTHER_COLOR = (SUBTITLE, BG)
-BOTTOM_Y = PAGE_H - 46  # 본문이 내려올 수 있는 한계 (아래는 꼬리말)
+BOTTOM_Y = PAGE_H - 46
+PURPLE = HexColor("#7A4FD1")
+# 월별 추이 막대: 아래에서부터 쌓는 순서 (키, 범례 이름, 색)
+TREND_SERIES = [("release", "보도자료", BLUE), ("plan", "기획", GREEN), ("interview", "인터뷰", PURPLE),
+                ("contrib", "기고", ORANGE), ("mention", "단순언급", GRAY)]  # 본문이 내려올 수 있는 한계 (아래는 꼬리말)
 
 TYPE_ORDER = ["인터뷰", "기고", "기획(오픈피알)", "기획(외부)", "보도자료", "단순언급"]
 SECTION_KEYS = {  # 구역 제목에 들어 있는 말 -> 구역 이름 (위에서부터 먼저 맞는 것; '단순 언급 주요 기사'라서 단순 언급이 먼저)
@@ -179,11 +183,15 @@ def summary_rows(wb):
 
 
 def trend_from_rows(rows):
-    """{형식: [12개]} -> 막대 그래프용 {'release','planned','mention'}"""
+    """{형식: [12개]} -> 막대 그래프용. 'planned'(기획·인터뷰·기고 합)는 합계 계산용,
+    'interview','contrib','plan'(기획 오픈피알+외부)은 막대를 형식별로 나눠 그리는 데 쓴다."""
     return {
         "release": list(rows["보도자료"]),
         "planned": [sum(rows[k][i] for k in PLANNED_TYPES) for i in range(12)],
         "mention": list(rows["단순언급"]),
+        "interview": list(rows["인터뷰"]),
+        "contrib": list(rows["기고"]),
+        "plan": [rows["기획(오픈피알)"][i] + rows["기획(외부)"][i] for i in range(12)],
     }
 
 
@@ -394,7 +402,7 @@ def _draw_types_and_trend(doc):
             cx = x0 + 12 + slot * i + slot / 2
             cur = i == m - 1
             y = base
-            for key, color in (("release", BLUE), ("planned", GREEN), ("mention", GRAY)):
+            for key, _, color in TREND_SERIES:
                 seg = tr[key][i] / mx * chart_h
                 if seg > 0:
                     p.rect(cx - bw / 2, y - seg, bw, seg, fill=color)
@@ -406,9 +414,9 @@ def _draw_types_and_trend(doc):
             p.text(cx, y - 13, str(tot[i]), font=BOLD if cur else MED, size=8.5, color=INK if cur else MUTED, align="center")
             p.text(cx, base + 5, f"{i + 1}월", font=BOLD if cur else REG, size=8.5, align="center")
         lx = x0 + 14
-        for name, color in (("보도자료", BLUE), ("기획·인터뷰·기고", GREEN), ("단순언급", GRAY)):
+        for _, name, color in TREND_SERIES:
             p.rect(lx, box + h - 17, 7, 7, fill=color, r=1.5)
-            lx = p.text(lx + 10, box + h - 18.5, name, size=8.3, color=MUTED) + 12
+            lx = p.text(lx + 10, box + h - 18.5, name, size=8.3, color=MUTED) + 9
     doc.top = box + h
 
 
