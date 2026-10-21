@@ -699,7 +699,7 @@ with tab2:
             st.error(f"PDF를 만들지 못했습니다: {e}")
             m_pdf = None
         fname = f"{M['year']}년_{M['month']}월_{meta['company']}_PR리포트"
-        b1, b2 = st.columns(2)
+        b1, b2, b3 = st.columns(3)
         if m_pdf:
             b1.download_button("📑 PDF 리포트 다운로드", data=m_pdf, file_name=f"{fname}.pdf", mime="application/pdf",
                                type="primary", width="stretch", on_click="ignore", key="m_dl_pdf",
@@ -711,6 +711,19 @@ with tab2:
             width="stretch", on_click="ignore", key="m_dl_work",
             help="작업을 나중에 이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
         )
+        m_preview_open = st.session_state.get("m_pdf_preview_open", False)
+        if b3.button("🙈 미리보기 닫기" if m_preview_open else "👁 PDF 미리보기", width="stretch",
+                     key="m_pdf_preview_btn", disabled=not m_pdf):
+            st.session_state["m_pdf_preview_open"] = not m_preview_open
+            st.rerun()
+        if m_preview_open and m_pdf:
+            with st.container(border=True):
+                with st.spinner("미리보기 만드는 중..."):
+                    m_pages = _pdf_page_images(m_pdf)
+                st.caption(f"PDF 미리보기 · {len(m_pages)}쪽 — 위에서 표·입력을 바꾸면 바로 반영됩니다.")
+                _, m_mid, _ = st.columns([1, 6, 1])
+                for img in m_pages:
+                    m_mid.image(img, width="stretch")
 
 # ------------------------------------------------------------------
 # 탭 3: 네이버 기사 수집
