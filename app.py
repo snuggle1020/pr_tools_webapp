@@ -29,7 +29,7 @@ from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
 from monthly_pdf import TYPE_ORDER, _to_date, assign_release, build_monthly_pdf, default_summary, read_history
 from monthly_report import (
-    KIND_OPTIONS, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
+    KIND_OPTIONS, auto_group_mentions, auto_mark_releases, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
 
@@ -484,10 +484,14 @@ with tab2:
                         "date": it["_dt"].date(), "kind": initial_kind(t, m_keyword, auto.get(id(it))),
                         "include": True, "group": "",
                     })
+                m_rels = guess_releases(arts, m_keyword)
+                n_rel = auto_mark_releases(arts, m_rels, m_keyword)  # 제목에 키워드 없는 우리 보도자료 기사
+                n_grp = auto_group_mentions(arts)  # 단순언급 중 같은 소식끼리 묶음
                 st.session_state["monthly"] = {
-                    "company": m_keyword, "year": int(m_year), "month": int(m_month), "articles": arts,
-                    "releases": guess_releases(arts, m_keyword), "meetings": [], "plans": [],
+                    "company": m_keyword, "keyword": m_keyword, "year": int(m_year), "month": int(m_month),
+                    "articles": arts, "releases": m_rels, "meetings": [], "plans": [],
                     "summary": None, "trend_rows": history_from_secrets(st.secrets, m_keyword, int(m_year)),
+                    "auto_note": (n_rel, n_grp),
                 }
                 st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
                 st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
@@ -526,6 +530,14 @@ with tab2:
         elif M["trend_rows"] and M["trend_rows"] == history_from_secrets(st.secrets, M["company"], M["year"]):
             st.info("앱에 저장해 둔 월별 건수(Secrets)를 불러왔습니다. 지난달 PDF를 올리면 그 기록으로 바뀝니다.")
         st.success(f"{M['company']} {M['year']}년 {M['month']}월 · 기사 {len(M['articles'])}건")
+        n_rel, n_grp = M.get("auto_note") or (0, 0)
+        if n_rel or n_grp:
+            st.caption(
+                "자동 정리: " + " · ".join(x for x in (
+                    f"제목에 기업명이 없지만 보도자료 기사와 같은 소식인 {n_rel}건을 보도자료로" if n_rel else "",
+                    f"단순언급 중 같은 소식인 {n_grp}건에 같은 묶음 이름을" if n_grp else "",
+                ) if x) + " 넣었습니다. 아래 표에서 확인하세요."
+            )
         company_name = st.text_input("PDF에 표시할 고객사명", value=M["company"], key=f"m_company_{run}")
 
         # ① 보도자료
@@ -558,9 +570,11 @@ with tab2:
         # ② 기사
         st.markdown("##### ② 기사 확인")
         st.caption(
-            "**형식**을 확인하세요. 자동 분류는 보도자료만 잡고, 제목에 키워드가 없으면 단순언급으로 넣었습니다. "
-            "형식이 빈 기사는 PDF에서 빠집니다. 단순언급은 같은 주제끼리 **묶음**에 같은 이름(예: SCM FAIR)을 적으면 "
-            "하나로 묶여 '관련 기사 N건'으로 나옵니다. 보고서에서 뺄 기사는 **포함**을 해제하세요."
+            "**형식**을 확인하세요. 자동 분류는 보도자료만 잡고(제목이 보도자료 기사와 같은 소식이면 보도자료), "
+            "제목에 키워드가 없으면 단순언급으로 넣었습니다. 형식이 빈 기사는 PDF에서 빠집니다. "
+            "단순언급은 제목이 비슷한 같은 소식끼리 **묶음** 이름을 자동으로 넣었고, 같은 이름끼리 하나로 묶여 "
+            "대표 기사 1건 + '관련 기사 N건'으로 나옵니다. 묶음은 직접 고치거나 지워도 됩니다. "
+            "보고서에서 뺄 기사는 **포함**을 해제하세요."
         )
         art_df = st.data_editor(
             pd.DataFrame(
@@ -668,11 +682,17 @@ with tab2:
                         continue
                     meta_a = fetch_article_meta(u, domain_map)
                     pub = meta_a["게재일자"].date() if meta_a["게재일자"] else date(M["year"], M["month"], 1)
-                    new.append({"url": meta_a["URL"], "media": meta_a["매체명"], "title": meta_a["제목"] or u,
-                                "date": pub, "kind": "", "include": True, "group": ""})
+                    t_new = meta_a["제목"] or u
+                    new.append({"url": meta_a["URL"], "media": meta_a["매체명"], "title": t_new, "date": pub,
+                                "kind": initial_kind(t_new, M.get("keyword") or M["company"], None),
+                                "include": True, "group": ""})
                     have.add(normalize_url(u))
-            M.update(articles=sort_articles(articles + new), releases=releases, meetings=meetings, plans=plans,
-                     summary=summary_text, company=meta["company"], trend_rows=trend_input)
+            merged = articles + new
+            # 새로 넣은 기사도 같은 기준으로: 우리 보도자료와 같은 소식이면 보도자료, 단순언급은 같은 소식끼리 묶음
+            n_rel = auto_mark_releases(merged, releases, M.get("keyword") or M["company"], only={a["url"] for a in new})
+            n_grp = auto_group_mentions(merged)
+            M.update(articles=sort_articles(merged), releases=releases, meetings=meetings, plans=plans,
+                     summary=summary_text, company=meta["company"], trend_rows=trend_input, auto_note=(n_rel, n_grp))
             st.session_state["m_run"] = run + 1
             st.rerun()
 

@@ -2,6 +2,7 @@
 """
 월간 PR리포트를 앱 안에서 편집해 PDF로 만드는 흐름의 데이터 처리.
   - 수집한 기사에 첫 형식 넣기 / 보도자료 목록 추정
+  - 제목이 비슷한 기사 찾기: 우리 보도자료와 같은 소식이면 보도자료로, 단순언급끼리 같은 소식이면 한 묶음으로
   - 앱에서 고친 기사·보도자료·미팅·목표 -> PDF용 데이터(monthly_pdf.build_monthly_pdf 입력) 계산
   - 월별 기록(형식별 1~12월 건수): 지난달 PDF에 숨겨 둔 기록(monthly_pdf.read_history) 또는
     처음 한 번 기존 PR리포트 엑셀의 Summary 시트에서 읽어 오고, 이번 달 PDF에 다시 숨겨 넣는다
@@ -9,6 +10,7 @@
 """
 import io
 import json
+import re
 from collections import Counter
 from datetime import date, datetime
 
@@ -52,6 +54,86 @@ def sort_articles(articles):
     return sorted(articles, key=lambda a: (a["date"] or date.max, media_sort_key(a["media"])))
 
 
+# ---------------------------------------------------------------- 제목이 비슷한 기사 찾기
+
+SAME_STORY_DAYS = 4  # 같은 소식으로 볼 게재일 차이
+
+
+def _bigrams(title, keyword=""):
+    """제목의 2글자 조각. [코너명]·키워드·문장부호는 빼고 본다."""
+    t = re.sub(r"\[[^\]]*\]", "", title or "")
+    if keyword:
+        t = t.replace(keyword, "")
+    t = re.sub(r"[^0-9a-z가-힣]", "", t.lower())
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def _same_story(a, b, ba, bb):
+    """같은 보도자료·같은 소식을 옮긴 기사인지: 제목 2글자 조각이 5개 이상, 짧은 쪽의 30% 이상 겹치고 게재일이 가까움.
+    실측(딥파인 10월 기사 45건): LX판토스 3건, 관광공사 AI 관광집사 18건이 정확히 묶이고 무관 기사는 섞이지 않음."""
+    if a["date"] and b["date"] and abs((a["date"] - b["date"]).days) > SAME_STORY_DAYS:
+        return False
+    shared = len(ba & bb)
+    return shared >= 5 and shared / (min(len(ba), len(bb)) or 1) >= 0.3
+
+
+def _lead(members):
+    """묶음의 대표 기사: 매체 영향력이 가장 큰 기사, 같으면 먼저 실린 기사 (PDF 대표 기사와 같은 기준)."""
+    return min(members, key=lambda a: (media_sort_key(a["media"]), a["date"] or date.max))
+
+
+def auto_mark_releases(articles, releases, keyword, only=None):
+    """제목에 키워드가 없어 단순언급·공란으로 들어온 기사 중, 우리 보도자료 기사와 같은 소식이면 보도자료로 바꾼다.
+    기준: 형식이 보도자료인 기사나 ① 보도자료 제목과 _same_story. only: 이 URL들만 바꿈 (None 이면 전부).
+    반환: 바꾼 기사 수."""
+    refs = [(a, _bigrams(a["title"], keyword)) for a in articles if a["kind"] == "보도자료"]
+    refs += [({"date": r["date"]}, _bigrams(r["title"], keyword)) for r in releases if r.get("title")]
+    changed = 0
+    for a in articles:
+        if a["kind"] not in ("", "단순언급") or (only is not None and a["url"] not in only):
+            continue
+        ba = _bigrams(a["title"], keyword)
+        if any(_same_story(a, r, ba, br) for r, br in refs):
+            a["kind"] = "보도자료"
+            a["group"] = ""
+            changed += 1
+    return changed
+
+
+def auto_group_mentions(articles):
+    """단순언급 기사 중 같은 소식끼리 묶음 이름을 채운다. 이미 묶음 이름이 있는 기사는 그대로 두고,
+    비어 있는 기사가 그 기사와 같은 소식이면 같은 이름을 쓴다. 혼자인 기사는 비워 둠 (그래도 1건짜리 주제로 나감).
+    묶음 이름은 대표 기사 제목 앞부분. 반환: 묶음이 생긴 기사 수."""
+    ms = [a for a in articles if a["kind"] == "단순언급"]
+    bg = [_bigrams(a["title"]) for a in ms]
+    parent = list(range(len(ms)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(ms)):
+        for j in range(i + 1, len(ms)):
+            if _same_story(ms[i], ms[j], bg[i], bg[j]):
+                parent[root(i)] = root(j)
+    clusters = {}
+    for i, a in enumerate(ms):
+        clusters.setdefault(root(i), []).append(a)
+    filled = 0
+    for members in clusters.values():
+        blank = [a for a in members if not (a.get("group") or "").strip()]
+        if len(members) < 2 or not blank:
+            continue
+        named = Counter(a["group"].strip() for a in members if (a.get("group") or "").strip())
+        name = named.most_common(1)[0][0] if named else re.sub(r"\s+", " ", _lead(members)["title"])[:24].strip()
+        for a in blank:
+            a["group"] = name
+            filled += 1
+    return filled
+
+
 # ---------------------------------------------------------------- 편집 결과 -> PDF 데이터
 
 def compose(meta, articles, releases, meetings, plans, trend_rows):
@@ -79,7 +161,7 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
             groups.setdefault((a.get("group") or "").strip() or a["title"], []).append(a)
     mentions = []
     for members in groups.values():
-        lead = min(members, key=lambda a: (media_sort_key(a["media"]), a["date"] or date.max))
+        lead = _lead(members)
         mentions.append({"media": lead["media"], "title": lead["title"], "url": lead["url"],
                          "count": len(members), "first": min(a["date"] or date.max for a in members)})
     mentions.sort(key=lambda m: (-m["count"], m["first"]))
