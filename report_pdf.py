@@ -315,7 +315,7 @@ def _draw_summary_card(p, top, arts, kpis):
             p.vline(X0 + pad + i * col_w, top + pad, kpi_h + 10)
 
     t = top + pad + kpi_h + 22
-    p.text(X0 + pad, t, "포털별 기사 게재 비율·네이버 게재 기사의 경우 다음, 구글 집계에서 제외", size=9.3, color=MUTED)
+    p.text(X0 + pad, t, "포털별 기사 게재 비율 · 네이버 게재 기사의 경우 다음, 구글 집계에서 제외", size=9.3, color=MUTED)
     t += 14 + 5
     for i, a in enumerate(arts):
         row, col = divmod(i, per_row)
