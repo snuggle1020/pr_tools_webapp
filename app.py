@@ -510,7 +510,7 @@ with tab2:
                 year, rows = (h["year"], h["rows"]) if h else (None, None)
                 if not h:
                     msg = ("warning", "이 PDF에는 월별 기록이 없습니다 (이 앱으로 만든 PDF가 아님). "
-                                      "아래 ④ 월별 건수 표에 직접 넣거나 기존 PR리포트 엑셀을 한 번 올려주세요.")
+                                      "아래 ⑤ 월별 건수 표에 직접 넣거나 기존 PR리포트 엑셀을 한 번 올려주세요.")
             else:
                 year, rows = trend_rows_from_xlsx(raw)
                 if not rows:
@@ -521,7 +521,7 @@ with tab2:
                 else:
                     M["trend_rows"] = rows
                     st.session_state["m_hist_ver"] = st.session_state.get("m_hist_ver", 0) + 1
-                    msg = ("info", f"'{m_prev.name}'에서 월별 건수를 불러왔습니다. 아래 ④ 표에서 확인할 수 있습니다.")
+                    msg = ("info", f"'{m_prev.name}'에서 월별 건수를 불러왔습니다. 아래 ⑤ 표에서 확인할 수 있습니다.")
             st.session_state["m_prev_msg"] = msg
         if m_prev is None:
             st.session_state.pop("m_prev_msg", None)
@@ -612,34 +612,39 @@ with tab2:
                                 placeholder="https://www.example.co.kr/news/...")
         add_go = st.button("➕ 기사 정보 불러와서 추가", key=f"m_add_btn_{run}")
 
-        # ③ 미팅·목표
-        st.markdown("##### ③ 기자 미팅 · 다음 달 목표")
+        def _row_inputs(name, init_rows, fields, add_label):
+            """줄마다 일반 입력칸 + 삭제 버튼, 아래 추가 버튼 (표 칸은 한글 입력이 저장되지 않는 경우가 있어서).
+            fields: [(이름, 너비, 예시)]. 반환: 내용이 있는 줄의 (값, ...) 목록."""
+            key = f"{name}_{run}"
+            if key not in st.session_state:
+                st.session_state[key] = [{"id": i, "v": [str(x) for x in r]} for i, r in enumerate(init_rows)]
+            rows = st.session_state[key]
+            for n, r in enumerate(rows):
+                cols = st.columns([w for _, w, _ in fields] + [1], vertical_alignment="bottom")
+                for j, (label, _, hint) in enumerate(fields):
+                    r["v"][j] = cols[j].text_input(label, value=r["v"][j], placeholder=hint,
+                                                   key=f"{key}_{r['id']}_{j}",
+                                                   label_visibility="visible" if n == 0 else "collapsed")
+                if cols[-1].button("삭제", key=f"{key}_{r['id']}_x", width="stretch"):
+                    st.session_state[key] = [x for x in rows if x["id"] != r["id"]]
+                    st.rerun()
+            if st.button(add_label, key=f"{key}_add"):
+                rows.append({"id": max((x["id"] for x in rows), default=-1) + 1, "v": [""] * len(fields)})
+                st.rerun()
+            return [tuple(v.strip() for v in r["v"]) for r in rows if any(v.strip() for v in r["v"])]
+
+        # ③ 기자 미팅
+        st.markdown("##### ③ 기자 미팅")
+        meetings = _row_inputs("m_meet", M["meetings"], [("매체", 2, "바이라인네트워크"), ("기자", 1.5, "홍길동"),
+                                                         ("주요 내용", 5, "회사 소개, 인터뷰 피칭")], "➕ 미팅 추가")
+        # ④ 다음 달 목표
         nm = M["month"] % 12 + 1
-        g1, g2 = st.columns(2)
-        meet_df = g1.data_editor(
-            pd.DataFrame(M["meetings"], columns=["매체", "기자", "주요 내용"]).astype(str),
-            num_rows="dynamic", hide_index=True, width="stretch", key=f"m_meet_{run}",
-        )
-        plan_df = g2.data_editor(
-            pd.DataFrame(M["plans"], columns=["형식", "내용", "진행 상황"]).astype(str),
-            num_rows="dynamic", hide_index=True, width="stretch", key=f"m_plan_{run}",
-            column_config={"형식": st.column_config.TextColumn("형식", help="예: 보도자료, 인터뷰, 기고, 기획")},
-        )
-        g1.caption("기자 미팅: 유의미한 미팅만 (인터뷰 피칭 가능성, 추가 미팅 요청 등)")
-        g2.caption(f"{nm}월 PR 목표")
+        st.markdown(f"##### ④ {nm}월 PR 목표")
+        plans = _row_inputs("m_plan", M["plans"], [("형식", 1.5, "보도자료"), ("내용", 5, "한국관광공사 오픈 이노베이션"),
+                                                   ("진행 상황", 2, "10/12 배포 예정")], "➕ 목표 추가")
 
-        def _rows(df):
-            out = []
-            for _, r in df.iterrows():
-                vals = tuple("" if pd.isna(v) or str(v) in ("None", "nan") else str(v).strip() for v in r.tolist())
-                if any(vals):
-                    out.append(vals)
-            return out
-
-        meetings, plans = _rows(meet_df), _rows(plan_df)
-
-        # ④ 월별 건수 (지난달까지) - 지난달 PDF/엑셀에서 불러온 값, 직접 고칠 수 있음. 이번 달은 기사 표에서 셈
-        st.markdown("##### ④ 월별 건수 (월별 추이·전월 비교)")
+        # ⑤ 월별 건수 (지난달까지) - 지난달 PDF/엑셀에서 불러온 값, 직접 고칠 수 있음. 이번 달은 기사 표에서 셈
+        st.markdown("##### ⑤ 월별 건수 (월별 추이·전월 비교)")
         hist_rows = {k: list((M["trend_rows"] or {}).get(k) or [0] * 12) for k in TYPE_ORDER}
         if M["month"] > 1:
             with st.expander(
@@ -666,7 +671,7 @@ with tab2:
         mdata, rel_dates, n_blank = compose(meta, articles, releases, meetings, plans, trend_input)
 
         # ⑤ 요약
-        st.markdown("##### ⑤ 이달의 요약")
+        st.markdown("##### ⑥ 이달의 요약")
         s_key, auto_key = f"m_summary_{run}", f"m_summary_auto_{run}"
         auto_text = default_summary(mdata, rel_dates)
         # 아직 손대지 않았으면(자동 문장 그대로면) 표를 고칠 때마다 자동 문장도 새로 맞춤. 직접 고친 뒤에는 건드리지 않음
