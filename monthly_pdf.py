@@ -565,7 +565,7 @@ def _draw_meetings_and_plans(doc):
 def _draw_articles(doc, dates):
     """기사 전체를 게재일·매체 순으로 한 표에 (보도자료별 묶음 줄 없이)"""
     arts = doc.data["articles"]
-    doc.section(6, "주요 기사 리스트", "제목을 누르면 기사로 이동")
+    doc.section(6, "주요 기사", "제목을 누르면 기사로 이동")
     doc.top += 26
     rows = []
     for no, a in enumerate(arts, 1):
