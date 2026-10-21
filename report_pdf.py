@@ -369,7 +369,7 @@ def _draw_featured(p, top, arts, limit, dry_run=False):
         for j, (a, lines) in enumerate(zip(pair, wrapped)):
             x = X0 + j * (cw + gap)
             p.rect(x, top, cw, h, fill=WHITE, stroke=LINE, r=8)
-            ct = top + (h - (40 + lead * len(lines))) / 2  # 옆 카드보다 제목 줄이 적으면 내용을 세로 가운데로
+            ct = top  # 같은 줄 카드끼리 매체명·제목 시작 위치를 맞춤 (위쪽 정렬)
             badge_w = min(_sw(a["media"], BOLD, 8.5) + 14, cw - 28)  # 매체명 뱃지
             p.rect(x + 14, ct + 11, badge_w, 15, fill=BADGE_BG, r=7.5)
             p.text(x + 14 + badge_w / 2, ct + 14.5, a["media"], font=BOLD, size=8.5, color=BLUE, align="center")
