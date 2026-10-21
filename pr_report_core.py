@@ -95,15 +95,32 @@ def _fetch_site_name(url):
     return None
 
 
+_DOMAIN_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "domain_to_media.json")
+_domain_map_cache = None
+
+
+def _domain_map():
+    """결과보고서·기사 수집 탭과 같은 매체명 목록(domain_to_media.json). 여기 고친 이름이 월간 리포트에도 똑같이 쓰이도록."""
+    global _domain_map_cache
+    if _domain_map_cache is None:
+        try:
+            with open(_DOMAIN_MAP_PATH, encoding="utf-8") as f:
+                _domain_map_cache = json.load(f)
+        except (OSError, ValueError):
+            _domain_map_cache = {}
+    return _domain_map_cache
+
+
 def media_from_link(link):
     domain = _domain_of(link)
     if not domain:
         return ""
-    if domain in MEDIA_MAP:
-        return MEDIA_MAP[domain]
     bare = re.sub(r"^[^.]+\.", "", domain)
-    if bare in MEDIA_MAP:
-        return MEDIA_MAP[bare]
+    for table in (_domain_map(), MEDIA_MAP):  # domain_to_media.json 이 우선
+        if domain in table:
+            return table[domain]
+        if bare in table:
+            return table[bare]
     if domain in _media_cache:
         return _media_cache[domain]
     name = _fetch_site_name(link)
