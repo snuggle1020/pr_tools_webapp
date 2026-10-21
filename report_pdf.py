@@ -315,7 +315,7 @@ def _draw_summary_card(p, top, arts, kpis):
             p.vline(X0 + pad + i * col_w, top + pad, kpi_h + 10)
 
     t = top + pad + kpi_h + 22
-    p.text(X0 + pad, t, "포털별 기사 게재 비율 · 막대 하나가 기사 한 건입니다", size=9.3, color=MUTED)
+    p.text(X0 + pad, t, "포털별 기사 게재 비율·네이버 게재 기사의 경우 다음, 구글 집계에서 제외", size=9.3, color=MUTED)
     t += 14 + 5
     for i, a in enumerate(arts):
         row, col = divmod(i, per_row)
@@ -323,15 +323,13 @@ def _draw_summary_card(p, top, arts, kpis):
         p.rect(X0 + pad + col * (sq_w + gap), t + row * (sq_h + gap), sq_w, sq_h, fill=color, r=3)
     t += sq_rows * (sq_h + gap) + 8
 
-    # 범례는 비율만 (건수는 아래 '포털 노출 구분' 카드). 기사 한 건은 가장 앞선 포털 하나로만 세므로
-    # 다음·구글은 '네이버(다음)에는 없고 그 포털에만 실린 기사'라는 뜻으로 '~에서만'을 붙인다.
+    # 범례는 비율만 (건수는 아래 '포털 노출 구분' 카드). 기사 한 건은 가장 앞선 포털 하나로만 셈
     shown = _shown_portals(arts)
     pcts = _percentages([sum(a["portal"] == name for a in arts) for name, _ in shown])
-    legend_name = {"다음": "다음에서만", "구글": "구글에서만"}
     x = X0 + pad
     for (name, color), pct in zip(shown, pcts):
         p.rect(x, t + 1.5, 8, 8, fill=color, r=1.5)
-        x = p.text(x + 12, t, f"{legend_name.get(name, name)} {pct}%", size=9.3, color=MUTED) + 14
+        x = p.text(x + 12, t, f"{name} {pct}%", size=9.3, color=MUTED) + 14
     return top + h
 
 
