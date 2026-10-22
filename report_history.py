@@ -10,7 +10,6 @@ import re
 from datetime import date, datetime
 
 TOPIC_ROW = 6  # 주제를 저장하는 행 (B6 '주제' / C6 값)
-RECENT_COUNT = 6  # 비교 카드에 보여줄 최근 보도자료 수 (이번 건 제외)
 REGULAR_RATIO = 0.5  # 올해 보도자료의 절반 이상에 실은 매체 = 꾸준히 싣는 매체
 
 
@@ -68,7 +67,7 @@ def build_comparison(history, dist_date, total, naver_media, today):
         "prev_total": prev["total"] if prev else None,
         "vs_prev": (total - prev["total"]) / prev["total"] * 100 if prev and prev["total"] else None,
         "rank": 1 + sum(h["total"] > total for h in year),
-        "recent": before[-RECENT_COUNT:],
+        "recent": [h for h in before if h["date"].year == today.year],  # 올해 이번 건 앞까지 배포한 보도자료 전부
         "first_media": [m for m in naver_media if m not in seen_ever],
         "regular_media": [m for m in naver_media if year and freq_year.get(m, 0) / len(year) >= REGULAR_RATIO],
     }
