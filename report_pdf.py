@@ -597,7 +597,7 @@ def _draw_comparison(p, top, cmp):
     """cmp: report_history.build_comparison() 결과 + rows=[{date, topic, total, now}] (최근 보도자료 + 이번 건)"""
     pad, gap, rows, h = _comparison_layout(cmp)
     p.rect(X0, top, W, h, fill=WHITE, stroke=LINE, r=10)
-    x = p.text(X0 + pad, top + 16, "최근 보도 성과 비교", font=BOLD, size=12.5)
+    x = p.text(X0 + pad, top + 16, "최근 보도 성과 비교", font=BOLD, size=13.5)
     start, end = cmp["period"]
     p.text(x + 10, top + 18.5, f"({start:%Y.%m} ~ {end:%Y.%m})", size=8.5, color=MUTED)
 
