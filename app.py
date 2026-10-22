@@ -20,7 +20,7 @@ import streamlit as st
 from naver_news import collect_coverage
 from report_sheet import (
     EXTRA_PORTALS, MIN_SHARED_CHUNKS, apply_manual_portals, build_sheet, derive_company, derive_keyword,
-    load_domain_map, resolve_coverage, title_overlap, write_topics,
+    domain_of, load_domain_map, report_sort_key, resolve_coverage, title_overlap, write_topics,
 )
 from report_pdf import auto_topic, build_pdf
 from report_history import build_comparison, read_history
@@ -82,6 +82,18 @@ def _records_store():
 
 
 RECORDS = _records_store()
+
+
+def _apply_media_map(rows, media_map):
+    """앱에서 고친 매체명 {도메인: 매체명} 을 적용하고 보고서 순서(포털 > 매체 영향력)로 다시 정렬."""
+    if not media_map:
+        return rows
+    out = []
+    for r in rows:
+        name = media_map.get(domain_of(r["URL"]))
+        out.append(dict(r, 매체명=name) if name else r)
+    out.sort(key=report_sort_key)
+    return out
 
 
 st.title("📰 PR 보고서 생성기")
@@ -180,6 +192,13 @@ with tab1:
                     rows, unmapped, auto_detected = resolve_coverage(coverage)
                 with st.spinner("네이버에서 잘려서 온 기사 제목을 원문에서 확인 중..."):
                     complete_truncated_titles(rows)
+                media_map = {}
+                if RECORDS is not None:
+                    try:
+                        media_map = RECORDS.media_map()
+                    except RecordsError:
+                        pass
+                rows = _apply_media_map(rows, media_map)
                 # 다음·구글 수동 입력으로 화면이 다시 그려져도(rerun) 결과가 유지되도록 세션에 보관
                 st.session_state["report"] = {
                     "title": title,
@@ -192,6 +211,7 @@ with tab1:
                     "auto_detected": auto_detected,
                     "existing": existing_file.getvalue() if existing_file is not None else None,
                     "history": history,
+                    "media_map": media_map,  # 앱에서 고친 매체명 {도메인: 매체명}
                 }
                 run = st.session_state.get("report_run", 0) + 1
                 st.session_state["report_run"] = run
@@ -215,14 +235,14 @@ with tab1:
         if report["auto_detected"]:
             lines = "\n".join(f"- {d} → {n}" for d, n in sorted(report["auto_detected"].items()))
             st.info(
-                "다음 매체는 고정 목록에 없어서 기사 페이지에서 자동으로 인식했습니다 "
-                "(맞는지 확인해보고, domain_to_media.json에 추가해두면 다음부턴 더 빨라져요):\n"
+                "다음 매체는 고정 목록에 없어서 기사 페이지에서 자동으로 인식했습니다. "
+                "틀린 이름은 아래 표의 **매체명** 칸에서 바로 고치세요:\n"
                 + lines
             )
         if report["unmapped"]:
             st.warning(
                 "매체명을 자동으로도 못 찾은 도메인: " + ", ".join(sorted(report["unmapped"]))
-                + " — 직접 확인해서 domain_to_media.json에 추가해주세요."
+                + " — 아래 표의 **매체명** 칸에서 직접 입력해 주세요."
             )
 
         st.markdown("##### 기사 확인 및 다음·구글 반영")
@@ -230,7 +250,8 @@ with tab1:
             "**⚠ 확인** 표시는 제목이 보도자료와 많이 달라 인터뷰·다른 소식일 수 있는 기사입니다. "
             "**⚠ 본문 확인 필요** 기사는 처음에 **포함**이 해제돼 있으니, 넣을 기사만 체크하세요. "
             "보고서에서 뺄 기사는 **포함** 체크를 해제하세요. "
-            "다음·구글은 자동 수집이 안 되니 직접 확인한 노출을 체크하면 PDF·엑셀에 바로 반영됩니다."
+            "다음·구글은 자동 수집이 안 되니 직접 확인한 노출을 체크하면 PDF·엑셀에 바로 반영됩니다. "
+            "**매체명**이 틀리면 칸을 눌러 고치세요. 고친 이름은 저장돼 다음 보고서부터 같은 매체에 자동으로 쓰입니다."
         )
 
         def _check_note(r):
@@ -259,7 +280,7 @@ with tab1:
                   "구글": "구글" in restore["portals"].get(rows[i]["URL"], ())} for i in order],
                 columns=["포함", "확인", "매체명", "제목", "게재일", "다음", "구글"],
             ),
-            disabled=["확인", "매체명", "제목", "게재일"],
+            disabled=["확인", "제목", "게재일"],
             hide_index=True,
             width="stretch",
             key=f"portal_flags_{run}",
@@ -270,12 +291,27 @@ with tab1:
                 "구글": st.column_config.CheckboxColumn("구글에도 노출", width="small"),
             },
         )
-        included, extra = [], {}
+        included, extra, renamed = [], {}, {}
         for pos, i in enumerate(order):
+            name = flags.iloc[pos]["매체명"]
+            name = "" if name is None or pd.isna(name) else str(name).strip()
+            row = rows[i]
+            if name and name != row["매체명"]:  # 표에서 고친 매체명
+                renamed[domain_of(row["URL"])] = name
+                row = dict(row, 매체명=name)
             if not bool(flags.iloc[pos]["포함"]):
                 continue
-            included.append(rows[i])
-            extra[rows[i]["URL"]] = {p for p in EXTRA_PORTALS if bool(flags.iloc[pos][p])}
+            included.append(row)
+            extra[row["URL"]] = {p for p in EXTRA_PORTALS if bool(flags.iloc[pos][p])}
+        known_map = report.setdefault("media_map", {})
+        new_names = {d: n for d, n in renamed.items() if known_map.get(d) != n}
+        if new_names and RECORDS is not None:  # 다음 보고서부터 같은 매체에 자동 적용되도록 저장
+            try:
+                RECORDS.update_media_map(new_names)
+                known_map.update(new_names)
+                st.toast("매체명 저장: " + ", ".join(f"{d} → {n}" for d, n in new_names.items()))
+            except RecordsError as e:
+                st.warning(f"고친 매체명을 저장하지 못했습니다 (이번 보고서에는 반영됨): {e}")
         n_excluded = len(rows) - len(included)
         if n_excluded:
             st.caption(f"포함 해제: {n_excluded}건은 PDF·엑셀에서 빠집니다.")
@@ -303,7 +339,7 @@ with tab1:
             by_url = {normalize_url(m["URL"]): m for m in fetched if m["URL"]}
             matched = {u: set(ps) for u, ps in prev["matched"].items()}
             with st.spinner(f"기사 {len(portals_by_url)}건 정보 불러오는 중..."):
-                domain_map = load_domain_map()
+                domain_map = {**load_domain_map(), **report.get("media_map", {})}
                 for u, ps in portals_by_url.items():
                     naver_url = naver_by_url.get(normalize_url(u))
                     if naver_url:

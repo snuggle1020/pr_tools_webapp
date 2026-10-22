@@ -88,6 +88,26 @@ class RecordsStore:
                     continue
                 raise
 
+    # ---------------------------------------------------------------- 매체명 (앱에서 직접 고친 이름)
+    def media_map(self):
+        """{도메인: 매체명} - 담당자가 앱에서 고친 매체명 (domain_to_media.json 보다 우선)."""
+        data, _ = self._read_raw()
+        return dict(data.get("media_map", {}))
+
+    def update_media_map(self, updates):
+        """updates: {도메인: 매체명} 을 저장 (같은 도메인은 새 이름으로)."""
+        self._ensure_branch()
+        for attempt in range(2):
+            data, sha = self._read_raw()
+            data.setdefault("media_map", {}).update(updates)
+            try:
+                self._write_raw(data, sha, f"매체명 수정 {len(updates)}건: " + ", ".join(f"{d}->{n}" for d, n in updates.items()))
+                return
+            except RecordsError as e:
+                if attempt == 0 and "409" in str(e):
+                    continue
+                raise
+
     # ---------------------------------------------------------------- 공개 함수
     def history(self, company):
         """report_history.read_history() 와 같은 모양의 기록 목록 (배포일 순)."""
