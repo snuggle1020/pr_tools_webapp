@@ -24,6 +24,7 @@ from report_sheet import (
 )
 from report_pdf import auto_topic, build_pdf
 from report_history import build_comparison, read_history
+from records_store import RecordsError, RecordsStore
 from article_meta import complete_truncated_titles, fetch_article_meta, normalize_url
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
@@ -67,6 +68,20 @@ def _load_naver_credentials():
 
 
 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET = _load_naver_credentials()
+
+
+def _records_store():
+    """보도자료 결과 기록 저장소 (Secrets 에 GITHUB_TOKEN 이 있을 때만). 없으면 None -> 엑셀로만 비교."""
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        try:
+            token = st.secrets["GITHUB_TOKEN"]
+        except Exception:
+            return None
+    return RecordsStore(token)
+
+
+RECORDS = _records_store()
 
 
 st.title("📰 PR 보고서 생성기")
@@ -147,6 +162,20 @@ with tab1:
                     coverage = None
 
             if coverage is not None:
+                # 이전 보도자료 기록 (최근 보도 성과 비교용): 기록 저장소 + (올렸다면) 기존 결과보고서 엑셀
+                excel_history = []
+                if existing_file is not None:
+                    excel_history = read_history(openpyxl.load_workbook(io.BytesIO(existing_file.getvalue()), data_only=True), company)
+                history = excel_history
+                if RECORDS is not None:
+                    try:
+                        if excel_history:  # 엑셀 속 보도자료를 기록으로 옮김 (이미 있는 배포일은 그대로)
+                            moved = RECORDS.upsert(company, excel_history, overwrite=False)
+                            if moved:
+                                st.info(f"올린 엑셀의 보도자료 {moved}건을 '{company}' 기록에 옮겼습니다. 다음부터는 엑셀 없이도 비교됩니다.")
+                        history = RECORDS.history(company)
+                    except RecordsError as e:
+                        st.warning(f"보도자료 기록을 불러오지 못해 올린 엑셀로만 비교합니다. ({e})")
                 with st.spinner("고정 목록에 없는 매체는 기사 페이지에서 매체명 자동 인식 중..."):
                     rows, unmapped, auto_detected = resolve_coverage(coverage)
                 with st.spinner("네이버에서 잘려서 온 기사 제목을 원문에서 확인 중..."):
@@ -162,9 +191,7 @@ with tab1:
                     "unmapped": unmapped,
                     "auto_detected": auto_detected,
                     "existing": existing_file.getvalue() if existing_file is not None else None,
-                    # 기존 결과보고서 엑셀이 있으면 이전 보도자료 기록 (최근 보도 성과 비교용)
-                    "history": read_history(openpyxl.load_workbook(io.BytesIO(existing_file.getvalue()), data_only=True), company)
-                    if existing_file is not None else [],
+                    "history": history,
                 }
                 run = st.session_state.get("report_run", 0) + 1
                 st.session_state["report_run"] = run
@@ -434,6 +461,27 @@ with tab1:
             on_click="ignore",
             help="내일 이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
         )
+        if RECORDS is not None:
+            saved_already = any(h["date"] == dist_date for h in report.get("history", []))
+            r1, r2 = st.columns([1, 3])
+            if r1.button("🗂 이번 보도자료 기록 저장", width="stretch", key=f"save_record_{run}"):
+                current = {"date": dist_date, "title": title, "total": len(final_rows),
+                           "topic": topics.get(dist_date) or auto_topic(title, company),
+                           "media": {r["매체명"] for r in final_rows}}
+                changed = [dict(h, topic=topics[h["date"]]) for h in report.get("history", [])
+                           if h["date"] in topics and h["date"] != dist_date and topics[h["date"]] != h["topic"]]
+                try:
+                    RECORDS.upsert(company, [current] + changed)
+                    report["history"] = RECORDS.history(company)
+                    st.success(f"'{company}' 기록에 저장했습니다 (게재 {len(final_rows)}건). 다음 보고서의 '최근 보도 성과 비교'에 반영됩니다.")
+                    saved_already = True
+                except RecordsError as e:
+                    st.error(f"기록 저장 실패: {e}")
+            r2.caption(
+                ("이 배포일 기록이 이미 있습니다. 다시 저장하면 지금 내용으로 바뀝니다. " if saved_already else "")
+                + "보고서를 다 확인한 뒤 눌러 주세요. 엑셀 없이도 다음 보고서에서 이번 결과와 비교할 수 있습니다."
+            )
+
         preview_open = st.session_state.get("pdf_preview_open", False)
         if d4.button("🙈 미리보기 닫기" if preview_open else "👁 PDF 미리보기", width="stretch", key="pdf_preview_btn"):
             st.session_state["pdf_preview_open"] = not preview_open
@@ -446,6 +494,38 @@ with tab1:
                 _, mid, _ = st.columns([1, 6, 1])
                 for img in pages:
                     mid.image(img, width="stretch")
+
+        if RECORDS is not None:
+            hist = report.get("history", [])
+            with st.expander(f"📚 {company} 보도자료 기록 ({len(hist)}건) · 보기·수정"):
+                st.caption("주제를 고치거나, 잘못 들어간 기록은 행을 선택해 삭제한 뒤 '기록 수정 저장'을 누르세요.")
+                rec_df = st.data_editor(
+                    pd.DataFrame([{"배포일": h["date"], "제목": h["title"], "주제": h["topic"], "게재 수": h["total"]}
+                                  for h in reversed(hist)], columns=["배포일", "제목", "주제", "게재 수"]),
+                    disabled=["배포일", "제목", "게재 수"],
+                    num_rows="delete",  # 행 삭제만 (추가는 막음)
+                    hide_index=True,
+                    width="stretch",
+                    key=f"records_editor_{run}_{len(hist)}",
+                    column_config={"배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD", width="small"),
+                                   "게재 수": st.column_config.NumberColumn("게재 수", format="%d건", width="small")},
+                )
+                if st.button("기록 수정 저장", key=f"records_save_{run}"):
+                    by_date = {h["date"]: h for h in hist}
+                    kept = []
+                    for _, row in rec_df.iterrows():
+                        h = by_date.get(row["배포일"])
+                        if h is None:
+                            continue  # 표에서 새로 추가한 빈 행은 무시
+                        topic = "" if row["주제"] is None or pd.isna(row["주제"]) else str(row["주제"]).strip()
+                        kept.append(dict(h, topic=topic))
+                    try:
+                        RECORDS.replace(company, kept)
+                        report["history"] = RECORDS.history(company)
+                        st.success(f"기록을 저장했습니다 ({len(kept)}건).")
+                        st.rerun()
+                    except RecordsError as e:
+                        st.error(f"기록 저장 실패: {e}")
 
 # ------------------------------------------------------------------
 # 탭 2: 월간 PR리포트
