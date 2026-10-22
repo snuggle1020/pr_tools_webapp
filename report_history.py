@@ -4,7 +4,7 @@
 
 시트 형식 (report_sheet.build_sheet 와 같음):
   C3 제목 / C5 배포일 / C6 주제(직접 고친 짧은 주제, 없으면 비어 있음) / 8행부터 기사 (C 매체명, D 제목, G 게재 포털)
-예전 시트에는 다른 회사 기사가 섞인 경우가 있어서, 기사 제목에 회사명이 있는 기사만 센다.
+게재 수는 시트에 실린 기사 전체 (실제로 보고한 건수 그대로) 로 센다.
 """
 import re
 from datetime import date, datetime
@@ -23,7 +23,7 @@ def _as_date(v):
     return date(int(m[1]), int(m[2]), int(m[3])) if m else None
 
 
-def read_history(wb, company):
+def read_history(wb, company=None):
     """워크북의 보도자료 시트들 -> [{sheet, date, title, topic, total, media(set)}], 배포일 순."""
     out = []
     for ws in wb.worksheets:
@@ -33,7 +33,7 @@ def read_history(wb, company):
         if not d:
             continue
         own = [r for r in ws.iter_rows(min_row=8, values_only=True)
-               if len(r) > 3 and r[1] is not None and r[2] and company in str(r[3] or "")]
+               if len(r) > 3 and r[1] is not None and r[2]]
         topic = ws.cell(row=TOPIC_ROW, column=3).value if ws.cell(row=TOPIC_ROW, column=2).value == "주제" else None
         out.append({
             "sheet": ws.title, "date": d, "title": str(ws["C3"].value or ""),
