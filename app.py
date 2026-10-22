@@ -11,7 +11,7 @@ import io
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import openpyxl
 import pandas as pd
@@ -20,9 +20,10 @@ import streamlit as st
 from naver_news import collect_coverage
 from report_sheet import (
     EXTRA_PORTALS, MIN_SHARED_CHUNKS, apply_manual_portals, build_sheet, derive_company, derive_keyword,
-    load_domain_map, resolve_coverage, title_overlap,
+    load_domain_map, resolve_coverage, title_overlap, write_topics,
 )
-from report_pdf import build_pdf
+from report_pdf import auto_topic, build_pdf
+from report_history import build_comparison, read_history
 from article_meta import complete_truncated_titles, fetch_article_meta, normalize_url
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
@@ -161,6 +162,9 @@ with tab1:
                     "unmapped": unmapped,
                     "auto_detected": auto_detected,
                     "existing": existing_file.getvalue() if existing_file is not None else None,
+                    # 기존 결과보고서 엑셀이 있으면 이전 보도자료 기록 (최근 보도 성과 비교용)
+                    "history": read_history(openpyxl.load_workbook(io.BytesIO(existing_file.getvalue()), data_only=True), company)
+                    if existing_file is not None else [],
                 }
                 run = st.session_state.get("report_run", 0) + 1
                 st.session_state["report_run"] = run
@@ -168,6 +172,7 @@ with tab1:
                 if saved_work and saved_work["title"] == title:
                     excluded, portals, manual_saved, known = restore_choices(saved_work, rows)
                     st.session_state["report"]["restore"] = {"excluded": excluded, "portals": portals, "known": known}
+                    st.session_state["report"]["saved_topics"] = saved_work.get("topics", {})
                     st.session_state[f"fetched_{run}"] = {"matched": {}, "fetched": manual_saved, "n": 0}
 
     report = st.session_state.get("report")
@@ -348,17 +353,53 @@ with tab1:
 
         final_rows = apply_manual_portals(included, extra, manual)
 
+        # 최근 보도 성과 비교 (기존 결과보고서 엑셀을 올렸을 때만): 수치는 이번 보고서 기준으로 매번 새로 계산
+        today_kst = datetime.now(timezone(timedelta(hours=9))).date()
+        naver_media = list(dict.fromkeys(r["매체명"] for r in final_rows if "네이버" in r.get("포털", ["네이버"])))
+        comparison = build_comparison(report.get("history", []), dist_date, len(final_rows), naver_media, today_kst)
+        topics = {}
+        if comparison:
+            saved_topics = report.get("saved_topics", {})
+            cmp_rows = [{"date": h["date"], "topic": saved_topics.get(h["date"]) or h["topic"] or auto_topic(h["title"], company),
+                         "total": h["total"]} for h in comparison["recent"]]
+            cmp_rows.append({"date": dist_date, "topic": saved_topics.get(dist_date) or auto_topic(title, company),
+                             "total": len(final_rows), "now": True})
+            st.markdown("##### 최근 보도 성과 비교 (PDF 마지막 쪽)")
+            st.caption(
+                "올린 결과보고서 엑셀의 이전 보도자료와 비교합니다. 주제가 길면 PDF에서 두 줄로 나옵니다. "
+                "주제를 고치면 PDF와 엑셀(각 시트 6행 '주제')에 함께 저장돼 다음 보고서에서도 그대로 쓰입니다."
+            )
+            edited = st.data_editor(
+                pd.DataFrame([{"배포일": r["date"], "주제": r["topic"], "게재 수": r["total"]} for r in cmp_rows]),
+                disabled=["배포일", "게재 수"],
+                hide_index=True,
+                width="stretch",
+                key=f"cmp_topics_{run}",
+                column_config={
+                    "배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD", width="small"),
+                    "주제": st.column_config.TextColumn("주제", width="large"),
+                    "게재 수": st.column_config.NumberColumn("게재 수", format="%d건", width="small"),
+                },
+            )
+            for r, topic in zip(cmp_rows, edited["주제"]):
+                r["topic"] = str(topic).strip() if topic is not None and str(topic).strip() else r["topic"]
+                topics[r["date"]] = r["topic"]
+            comparison["rows"] = cmp_rows
+
         if report["existing"] is not None:
             wb = openpyxl.load_workbook(io.BytesIO(report["existing"]))
         else:
             wb = openpyxl.Workbook()
             wb.remove(wb.active)
         build_sheet(wb, dist_date.strftime("%y%m%d"), title, company, dist_str, final_rows)
+        if topics:
+            write_topics(wb, topics)
         wb.active = 0  # 새로 추가된(맨 왼쪽) 시트가 열리도록
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        pdf_bytes = build_pdf(title, company, dist_str, final_rows, window_days=REPORT_WINDOW_DAYS)
+        pdf_bytes = build_pdf(title, company, dist_str, final_rows, window_days=REPORT_WINDOW_DAYS,
+                              generated_on=today_kst, comparison=comparison)
 
         n_extra = sum(len(v) > 0 for v in extra.values()) + len(manual)
         if n_extra:
@@ -386,7 +427,7 @@ with tab1:
         )
         d3.download_button(
             "💾 작업 저장",
-            data=dump_work(title, dist_date, rows, included, extra, manual, company=report.get("company_input", "")),
+            data=dump_work(title, dist_date, rows, included, extra, manual, company=report.get("company_input", ""), topics=topics),
             file_name=f"작업_{company}_{dist_date:%y%m%d}.json",
             mime="application/json",
             width="stretch",

@@ -224,3 +224,22 @@ def build_sheet(wb, sheet_name, title, company, distribution_date, rows):
                     cell.hyperlink = v
             if col == 6:  # 게재일자 열(F) 포맷: 2026-07-02
                 cell.number_format = "yyyy-mm-dd"
+
+
+def write_topics(wb, topics):
+    """topics: {배포일(date): 주제} -> 해당 배포일 시트의 6행에 'B6 주제 / C6 값'으로 저장
+    (최근 보도 성과 비교 카드에서 쓰는 짧은 주제. 다음 보고서 때 다시 입력하지 않도록 엑셀에 남김)."""
+    from report_history import TOPIC_ROW, _as_date
+    for ws in wb.worksheets:
+        if ws["B3"].value != "제목":
+            continue
+        d = _as_date(ws["C5"].value)
+        if d not in topics:
+            continue
+        b = ws.cell(row=TOPIC_ROW, column=2, value="주제")
+        b.font = Font(name=FONT_NAME, size=10)
+        b.fill = HEADER_FILL
+        b.alignment = Alignment(horizontal="center", vertical="center")
+        c = ws.cell(row=TOPIC_ROW, column=3, value=topics[d])
+        c.font = Font(name=FONT_NAME, size=10)
+        c.alignment = Alignment(horizontal="left", vertical="center")

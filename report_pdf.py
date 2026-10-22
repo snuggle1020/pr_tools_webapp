@@ -39,6 +39,8 @@ GRAY = HexColor("#C8CDD8")
 PILL_BG = HexColor("#EEF0F4")    # 묶음 기사 표시 바탕
 WHITE = HexColor("#FFFFFF")
 BADGE_BG = HexColor("#E6ECFB")   # 주요 매체 카드의 매체명 뱃지 바탕
+CMP_NOW_BG = HexColor("#F2F5FD")  # 최근 보도 성과 비교: 이번 건 줄 바탕
+CMP_TRACK = HexColor("#EEF0F4")   # 최근 보도 성과 비교: 막대 바탕
 WEEKDAYS = "월화수목금토일"
 
 PAGE_W, PAGE_H = A4
@@ -550,10 +552,124 @@ def _draw_footer(p, top, portals):
     p.text(X0 + W, top + 20, right, size=8.5, color=MUTED, align="right")
 
 
+# ---------------------------------------------------------------- 최근 보도 성과 비교 (마지막 쪽)
+
+CMP_TOPIC_W = 250  # 주제 칸 폭
+CMP_SIZE = 8.8
+CMP_ROW_H = 19
+CMP_LINE_H = 12
+
+
+def auto_topic(title, company):
+    """비교 카드에 쓸 주제: 회사명 뒤부터 말줄임표 앞까지(따옴표 제거). 한 줄을 넘으면 협력사 부분('~과/와')을 뺌.
+    그래도 길면 그대로 두고 카드에서 두 줄로 쓴다. 앱에서 담당자가 고칠 수 있다."""
+    _register_fonts()
+    s = title.split(company, 1)[1] if company and company in title else title
+    s = re.split(r"…|\.\.\.", s.lstrip(" ,，"))[0]
+    s = re.sub(r"[‘’'\"“”]", "", s).strip()
+    if _sw(s, MED, CMP_SIZE) <= CMP_TOPIC_W:
+        return s
+    words = s.split()
+    idx = max((i for i, w in enumerate(words) if re.search(r"(과|와)$", w)), default=None)
+    if idx is not None and idx < len(words) - 1:
+        rest = " ".join(words[idx + 1:])
+        if _sw(rest, MED, CMP_SIZE) <= CMP_TOPIC_W:
+            return rest
+    return s
+
+
+def _comparison_layout(cmp):
+    pad = 15
+    rows = [dict(r, lines=_wrap(r["topic"], MED, CMP_SIZE, CMP_TOPIC_W)[:2]) for r in cmp["rows"]]
+    for r in rows:
+        r["h"] = CMP_ROW_H + CMP_LINE_H * (len(r["lines"]) - 1)
+    chip_lines = (1 if cmp["first_media"] else 0) + (1 if cmp["regular_media"] else 0)
+    gap = 16
+    h = 94 + gap + sum(r["h"] for r in rows) + (4 + gap + 19 * chip_lines - 4 if chip_lines else 0) + 14
+    return pad, gap, rows, h
+
+
+def _comparison_height(cmp):
+    return _comparison_layout(cmp)[3]
+
+
+def _draw_comparison(p, top, cmp):
+    """cmp: report_history.build_comparison() 결과 + rows=[{date, topic, total, now}] (최근 보도자료 + 이번 건)"""
+    pad, gap, rows, h = _comparison_layout(cmp)
+    p.rect(X0, top, W, h, fill=WHITE, stroke=LINE, r=10)
+    x = p.text(X0 + pad, top + 16, "최근 보도 성과 비교", font=BOLD, size=12.5)
+    start, end = cmp["period"]
+    p.text(x + 10, top + 18.5, f"({start:%Y.%m} ~ {end:%Y.%m})", size=8.5, color=MUTED)
+
+    # 수치 세 칸 (칸마다 가운데 정렬)
+    t = top + 44
+    col_w = (W - 2 * pad) / 3
+    kpis = [
+        (f"{cmp['vs_avg']:+.0f}" if cmp["vs_avg"] is not None else "-", "%",
+         f"평균 ({cmp['avg']:.1f}건) 대비" if cmp["avg"] is not None else "올해 비교 기록 없음"),
+        (f"{cmp['vs_prev']:+.0f}" if cmp["vs_prev"] is not None else "-", "%",
+         f"직전 ({cmp['prev_total']}건) 대비" if cmp["prev_total"] is not None else "직전 기록 없음"),
+        (f"{cmp['rank']}", "위", "게재 순위"),
+    ]
+    for i, (big, unit, label) in enumerate(kpis):
+        cx = X0 + pad + i * col_w + col_w / 2
+        num_w = _sw(big, BOLD, 20) + (2 + _sw(unit, MED, 10) if big != "-" else 0)
+        nx = p.text(cx - num_w / 2, t, big, font=BOLD, size=20, color=INK)
+        if big != "-":
+            p.text(nx + 2, t + 8, unit, font=MED, size=10, color=MUTED)
+        p.text(cx, t + 28, label, size=8.8, color=MUTED, align="center")
+        if i:
+            p.vline(X0 + pad + i * col_w, t - 2, 42)
+
+    # 최근 보도자료: 배포일 | 주제(두 줄까지) | 막대 | 게재 수
+    t = top + 94
+    p.hline(X0 + pad, t, W - 2 * pad)
+    t += gap
+    date_w, num_w = 44, 34
+    bar_x = X0 + pad + date_w + CMP_TOPIC_W + 10
+    bar_w = X0 + W - pad - num_w - bar_x
+    vmax = max([r["total"] for r in rows] + [1])
+    for r in rows:
+        now = r.get("now")
+        mid = t + (len(r["lines"]) - 1) * CMP_LINE_H / 2  # 두 줄이면 날짜·막대·건수를 두 줄 가운데에
+        if now:
+            p.rect(X0 + pad - 6, t - 4.5, W - 2 * pad + 12, r["h"] - 2, fill=CMP_NOW_BG, r=5)
+        p.text(X0 + pad, mid, f"{r['date']:%m.%d}", size=CMP_SIZE, color=BLUE if now else MUTED, font=SEMI if now else REG)
+        for k, line in enumerate(r["lines"]):
+            p.text(X0 + pad + date_w, t + k * CMP_LINE_H, line, font=SEMI if now else MED, size=CMP_SIZE,
+                   color=BLUE if now else INK)
+        p.rect(bar_x, mid + 1.5, bar_w, 7, fill=CMP_TRACK, r=3.5)
+        if r["total"]:
+            p.rect(bar_x, mid + 1.5, max(7, bar_w * r["total"] / vmax), 7, fill=BLUE if now else LIGHT_BLUE, r=3.5)
+        p.text(X0 + W - pad, mid, f"{r['total']}건", font=BOLD, size=CMP_SIZE, color=BLUE if now else INK, align="right")
+        t += r["h"]
+
+    # 매체 줄
+    chip_rows = [(label, names) for label, names in (("처음 실어준 매체", cmp["first_media"]),
+                                                    ("꾸준히 싣는 매체", cmp["regular_media"])) if names]
+    if chip_rows:
+        t += 4
+        p.hline(X0 + pad, t, W - 2 * pad)
+        t += gap
+        for label, names in chip_rows:
+            p.text(X0 + pad, t, label, font=SEMI, size=CMP_SIZE, color=MUTED)
+            x = x0 = X0 + pad + 76
+            for m in names:  # 한 줄이 차면 거기까지만
+                w = _sw(m, MED, 8.3) + 12
+                if x + w > X0 + W - pad:
+                    break
+                p.rect(x, t - 2.5, w, 14, fill=BADGE_BG, r=7)
+                p.text(x + w / 2, t, m, font=MED, size=8.3, color=BLUE, align="center")
+                x += w + 5
+            t += 19
+    return top + h
+
+
 # ---------------------------------------------------------------- 진입점
 
-def build_pdf(title, company, distribution_date, rows, window_days=3, generated_on=None):
+def build_pdf(title, company, distribution_date, rows, window_days=3, generated_on=None, comparison=None):
     """rows: report_sheet.resolve_coverage()가 반환한 리스트. 반환값: PDF bytes.
+    comparison: 있으면 기사 표 아래에 '최근 보도 성과 비교' 카드 (report_history.build_comparison + rows).
     집계일: 배포일 ~ 보고서를 만드는 날(한국 시간). 단 수집 기간(배포일+window_days)을 넘지 않는다.
     generated_on: 보고서 만드는 날 (테스트용, 기본값은 오늘)"""
     _register_fonts()
@@ -609,6 +725,12 @@ def build_pdf(title, company, distribution_date, rows, window_days=3, generated_
         first = False
         if not remaining:
             break
+    if comparison and comparison.get("rows"):
+        top = end + 14
+        if top + _comparison_height(comparison) > PAGE_H - BOTTOM - 40:  # 표 아래에 안 들어가면 다음 쪽
+            c.showPage()
+            top = TOP
+        end = _draw_comparison(p, top, comparison)
     used_portals = [n for n in ("네이버", "다음", "구글") if n == "네이버" or any(n in a["portals_text"] for a in arts)]
     _draw_footer(p, end, used_portals)
     c.save()

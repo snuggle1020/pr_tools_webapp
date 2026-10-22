@@ -15,7 +15,7 @@ from article_meta import normalize_url
 VERSION = 1
 
 
-def dump_work(title, dist_date, rows, included, extra, manual, company="") -> bytes:
+def dump_work(title, dist_date, rows, included, extra, manual, company="", topics=None) -> bytes:
     """rows: 이번에 수집한 네이버 기사 전체 / included: 그중 '포함'된 기사 /
     extra: {URL: {"다음","구글"}} / manual: 다음·구글에서만 찾은 기사 목록."""
     included_urls = {r["URL"] for r in included}
@@ -28,6 +28,7 @@ def dump_work(title, dist_date, rows, included, extra, manual, company="") -> by
         "excluded_urls": [r["URL"] for r in rows if r["URL"] not in included_urls],
         "naver_urls": [r["URL"] for r in rows],  # 저장 당시 확인한 네이버 기사 (포함/해제를 직접 정한 기사)
         "portals": {url: sorted(ps) for url, ps in extra.items() if ps},
+        "topics": {d.isoformat(): t for d, t in (topics or {}).items()},  # 최근 보도 성과 비교 주제 (배포일별)
         "manual": [
             {"매체명": m["매체명"], "제목": m["제목"], "URL": m["URL"],
              "게재일": m["게재일자"].date().isoformat(), "포털": sorted(m["포털"])}
@@ -49,6 +50,7 @@ def load_work(raw: bytes) -> dict:
     data.setdefault("naver_urls", [])
     data.setdefault("portals", {})
     data.setdefault("manual", [])
+    data["topics"] = {date.fromisoformat(k): v for k, v in data.get("topics", {}).items()}
     return data
 
 
