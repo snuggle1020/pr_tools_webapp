@@ -556,8 +556,8 @@ def _draw_footer(p, top, portals):
 
 CMP_TOPIC_W = 250  # 주제 칸 폭
 CMP_SIZE = 8.8
-CMP_ROW_H = 19
-CMP_LINE_H = 12
+CMP_ROW_H = 25
+CMP_LINE_H = 13
 
 
 def auto_topic(title, company):
@@ -631,9 +631,10 @@ def _draw_comparison(p, top, cmp):
     vmax = max([r["total"] for r in rows] + [1])
     for r in rows:
         now = r.get("now")
+        row_t, t = t, t + (CMP_ROW_H - 19) / 2  # 넓힌 만큼 위아래 여백을 똑같이
         mid = t + (len(r["lines"]) - 1) * CMP_LINE_H / 2  # 두 줄이면 날짜·막대·건수를 두 줄 가운데에
         if now:
-            p.rect(X0 + pad - 6, t - 4.5, W - 2 * pad + 12, r["h"] - 2, fill=CMP_NOW_BG, r=5)
+            p.rect(X0 + pad - 6, row_t - 4.5, W - 2 * pad + 12, r["h"] - 2, fill=CMP_NOW_BG, r=5)
         p.text(X0 + pad, mid, f"{r['date']:%m.%d}", size=CMP_SIZE, color=BLUE if now else MUTED, font=SEMI if now else REG)
         for k, line in enumerate(r["lines"]):
             p.text(X0 + pad + date_w, t + k * CMP_LINE_H, line, font=SEMI if now else MED, size=CMP_SIZE,
@@ -642,7 +643,7 @@ def _draw_comparison(p, top, cmp):
         if r["total"]:
             p.rect(bar_x, mid + 1.5, max(7, bar_w * r["total"] / vmax), 7, fill=BLUE if now else LIGHT_BLUE, r=3.5)
         p.text(X0 + W - pad, mid, f"{r['total']}건", font=BOLD, size=CMP_SIZE, color=BLUE if now else INK, align="right")
-        t += r["h"]
+        t = row_t + r["h"]
 
     # 매체 줄
     chip_rows = [(label, names) for label, names in (("처음 실어준 매체", cmp["first_media"]),
