@@ -115,6 +115,20 @@ class RecordsStore:
         self._update(company, fn, f"{company} 보도자료 기록 {len(records)}건 저장")
         return added[0]
 
+    def save(self, company, records, deletes=()):
+        """records 를 저장(같은 배포일은 덮어씀)하고 deletes(date 목록) 배포일 기록은 지움. 한 번에 커밋."""
+        drop = {d.isoformat() for d in deletes}
+
+        def fn(rows):
+            by_date = {r["date"]: r for r in rows if r["date"] not in drop}
+            for rec in records:
+                key = rec["date"].isoformat()
+                by_date[key] = {"date": key, "title": rec["title"], "topic": rec.get("topic", ""),
+                                "total": int(rec["total"]), "media": sorted(rec.get("media", []))}
+            return list(by_date.values())
+
+        self._update(company, fn, f"{company} 보도자료 기록 저장 ({len(records)}건, 삭제 {len(drop)}건)")
+
     def replace(self, company, records):
         """기록 수정 표에서 고친 결과로 통째로 바꿈 (주제 수정·삭제)."""
         def fn(_rows):

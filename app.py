@@ -385,6 +385,7 @@ with tab1:
         naver_media = list(dict.fromkeys(r["매체명"] for r in final_rows if "네이버" in r.get("포털", ["네이버"])))
         comparison = build_comparison(report.get("history", []), dist_date, len(final_rows), naver_media, today_kst)
         topics = {}
+        deleted_dates = []
         if comparison:
             saved_topics = report.get("saved_topics", {})
             cmp_rows = [{"date": h["date"], "topic": saved_topics.get(h["date"]) or h["topic"] or auto_topic(h["title"], company),
@@ -393,23 +394,33 @@ with tab1:
                              "total": len(final_rows), "now": True})
             st.markdown("##### 최근 보도 성과 비교 (PDF 마지막 쪽)")
             st.caption(
-                "올린 결과보고서 엑셀의 이전 보도자료와 비교합니다. 주제가 길면 PDF에서 두 줄로 나옵니다. "
-                "주제를 고치면 PDF와 엑셀(각 시트 6행 '주제')에 함께 저장돼 다음 보고서에서도 그대로 쓰입니다."
+                "올해 배포한 보도자료와 비교합니다. 주제를 고치거나, 잘못 들어간 보도자료는 행을 선택해 삭제하세요 "
+                "(이번 건 줄은 지워도 남습니다). PDF에는 바로 반영되고, 아래 '🗂 이번 보도자료 기록 저장'을 누르면 "
+                "기록에도 저장돼 다음 보고서에서 그대로 쓰입니다. 주제가 길면 PDF에서 두 줄로 나옵니다."
             )
             edited = st.data_editor(
                 pd.DataFrame([{"배포일": r["date"], "주제": r["topic"], "게재 수": r["total"]} for r in cmp_rows]),
                 disabled=["배포일", "게재 수"],
+                num_rows="delete",  # 행 삭제만 (추가는 막음)
                 hide_index=True,
                 width="stretch",
-                key=f"cmp_topics_{run}",
+                key=f"cmp_topics_{run}_{len(cmp_rows)}",
                 column_config={
                     "배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD", width="small"),
                     "주제": st.column_config.TextColumn("주제", width="large"),
                     "게재 수": st.column_config.NumberColumn("게재 수", format="%d건", width="small"),
                 },
             )
-            for r, topic in zip(cmp_rows, edited["주제"]):
-                r["topic"] = str(topic).strip() if topic is not None and str(topic).strip() else r["topic"]
+            edited_topics = {}
+            for _, row in edited.iterrows():
+                d = row["배포일"].date() if hasattr(row["배포일"], "date") and not isinstance(row["배포일"], date) else row["배포일"]
+                t = row["주제"]
+                edited_topics[d] = "" if t is None or pd.isna(t) else str(t).strip()
+            # 표에서 지운 이전 보도자료 (이번 건은 지워도 유지)
+            deleted_dates = [r["date"] for r in cmp_rows if r["date"] not in edited_topics and not r.get("now")]
+            cmp_rows = [r for r in cmp_rows if r["date"] in edited_topics or r.get("now")]
+            for r in cmp_rows:
+                r["topic"] = edited_topics.get(r["date"]) or r["topic"]
                 topics[r["date"]] = r["topic"]
             comparison["rows"] = cmp_rows
 
@@ -471,15 +482,16 @@ with tab1:
                 changed = [dict(h, topic=topics[h["date"]]) for h in report.get("history", [])
                            if h["date"] in topics and h["date"] != dist_date and topics[h["date"]] != h["topic"]]
                 try:
-                    RECORDS.upsert(company, [current] + changed)
+                    RECORDS.save(company, [current] + changed, deletes=deleted_dates)
                     report["history"] = RECORDS.history(company)
-                    st.success(f"'{company}' 기록에 저장했습니다 (게재 {len(final_rows)}건). 다음 보고서의 '최근 보도 성과 비교'에 반영됩니다.")
+                    st.success(f"'{company}' 기록에 저장했습니다 (게재 {len(final_rows)}건"
+                               + (f", 삭제 {len(deleted_dates)}건" if deleted_dates else "") + "). 다음 보고서에 반영됩니다.")
                     saved_already = True
                 except RecordsError as e:
                     st.error(f"기록 저장 실패: {e}")
             r2.caption(
                 ("이 배포일 기록이 이미 있습니다. 다시 저장하면 지금 내용으로 바뀝니다. " if saved_already else "")
-                + "보고서를 다 확인한 뒤 눌러 주세요. 엑셀 없이도 다음 보고서에서 이번 결과와 비교할 수 있습니다."
+                + "보고서를 다 확인한 뒤 눌러 주세요. 이번 결과와 위 표에서 고친 주제·삭제가 기록에 저장됩니다."
             )
 
         preview_open = st.session_state.get("pdf_preview_open", False)
@@ -494,38 +506,6 @@ with tab1:
                 _, mid, _ = st.columns([1, 6, 1])
                 for img in pages:
                     mid.image(img, width="stretch")
-
-        if RECORDS is not None:
-            hist = report.get("history", [])
-            with st.expander(f"📚 {company} 보도자료 기록 ({len(hist)}건) · 보기·수정"):
-                st.caption("주제를 고치거나, 잘못 들어간 기록은 행을 선택해 삭제한 뒤 '기록 수정 저장'을 누르세요.")
-                rec_df = st.data_editor(
-                    pd.DataFrame([{"배포일": h["date"], "제목": h["title"], "주제": h["topic"], "게재 수": h["total"]}
-                                  for h in reversed(hist)], columns=["배포일", "제목", "주제", "게재 수"]),
-                    disabled=["배포일", "제목", "게재 수"],
-                    num_rows="delete",  # 행 삭제만 (추가는 막음)
-                    hide_index=True,
-                    width="stretch",
-                    key=f"records_editor_{run}_{len(hist)}",
-                    column_config={"배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD", width="small"),
-                                   "게재 수": st.column_config.NumberColumn("게재 수", format="%d건", width="small")},
-                )
-                if st.button("기록 수정 저장", key=f"records_save_{run}"):
-                    by_date = {h["date"]: h for h in hist}
-                    kept = []
-                    for _, row in rec_df.iterrows():
-                        h = by_date.get(row["배포일"])
-                        if h is None:
-                            continue  # 표에서 새로 추가한 빈 행은 무시
-                        topic = "" if row["주제"] is None or pd.isna(row["주제"]) else str(row["주제"]).strip()
-                        kept.append(dict(h, topic=topic))
-                    try:
-                        RECORDS.replace(company, kept)
-                        report["history"] = RECORDS.history(company)
-                        st.success(f"기록을 저장했습니다 ({len(kept)}건).")
-                        st.rerun()
-                    except RecordsError as e:
-                        st.error(f"기록 저장 실패: {e}")
 
 # ------------------------------------------------------------------
 # 탭 2: 월간 PR리포트
