@@ -43,7 +43,7 @@ Streamlit Cloud가 자동으로 재배포함 (몇 분 내 반영).
 
 ## 폴더 구성
 
-- `app.py` — Streamlit 화면 (탭1: 결과보고서, 탭2: 월간 PR리포트)
+- `app.py` — Streamlit 화면 (탭1: 결과보고서, 탭2: 월간 PR리포트, 탭3: 연간 PR리포트, 탭4: 네이버 기사 수집)
 - `naver_news.py` — 결과보고서용 네이버 뉴스 검색 (배포일 전후 N일)
 - `report_sheet.py` — 결과보고서 엑셀 시트 조립 로직 (매체명 인식/정렬은 `resolve_coverage()`)
 - `records_store.py` — 보도자료 결과 기록 저장소. 같은 GitHub 저장소의 `pr-records` 브랜치 `records.json`에 고객사별로 저장 (Secrets에 `GITHUB_TOKEN` 필요: 이 저장소 Contents 읽기/쓰기). 결과보고서 '최근 보도 성과 비교'가 엑셀 없이 이 기록을 씀
@@ -53,6 +53,8 @@ Streamlit Cloud가 자동으로 재배포함 (몇 분 내 반영).
 - `report_pdf.py` — 결과보고서 PDF (핵심 수치 카드 + 기사별 막대, 주요 매체 게재, 포털/매체유형 분포, 게재 기사 전체 표. 제목 클릭 시 원문 이동)
 - `fonts/` — PDF용 폰트 (OFL 라이선스, PDF에 임베드되어 서버에 한글 폰트가 없어도 안 깨짐). 본문은 Pretendard, Pretendard에 없는 한자(韓·美·中 등)는 `NotoSansKR-Hanja-*.ttf`(Noto Sans KR에서 한자만 추려 굵기를 고정한 파일)로 표시
 - `pr_report_core.py` — 월간 PR리포트 엑셀 조립 + 기사형식(K열) 자동분류 로직
+- `annual_report.py` — 연간 PR리포트 데이터. 월간 PR리포트 엑셀(올해 최근 달 파일 + 지난 해 12월 파일들)에서 달마다 형식별 건수·보도자료·기사·기자 미팅을 모으고, 보도자료 배포일·주제 추정, 포털(네이버 검색으로 확인)·기자명(기사 본문 바이라인) 확인
+- `annual_pdf.py` — 연간 PR리포트 PDF (핵심 수치·월별 추이·전년 대비·연도별 추이·하이라이트·주제/요일별 평균·보도자료 순위·매체 유형·포털·매체/기자 TOP 5·기자 미팅·총 정리). 쪽마다 남는 높이를 구역 사이에 나눔
 - `media_order.py` — 매체 정렬 순서·유형 (통신사>일간지>주요 경제지>IT전문지>산업지>일반 경제지>교육전문지>온라인매체, 자회사는 모회사 바로 아래). 보고서는 포털(네이버 CP>검색제휴>다음>구글)이 먼저, 그 안에서 이 순서
 - `domain_to_media.json` — 결과보고서용 도메인→매체명 매핑
 - `.streamlit/secrets.toml` — 로컬 테스트용 API 키 (git에 올라가지 않음)

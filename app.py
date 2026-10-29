@@ -3,6 +3,7 @@
 PR 리포트 도구 웹앱.
 - 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 + PDF 보고서 생성)
 - 탭2: 월간 PR리포트 (한 달 기사 수집·자동분류 -> 앱에서 확인·수정 -> PDF, 월별 기록은 PDF에 숨겨 다음 달로 이어감)
+- 탭3: 연간 PR리포트 (월간 PR리포트 엑셀로 1년 치 집계 -> 보도자료·하이라이트·포털·기자명 확인 -> PDF)
 
 네이버 API 키는 Streamlit Cloud의 App settings > Secrets 에
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
@@ -34,6 +35,11 @@ from monthly_report import (
     KIND_OPTIONS, auto_group_mentions, auto_mark_releases, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
+from annual_report import (
+    PORTALS, TOPICS, check_portal, compose_annual, default_highlights, default_summary, default_wrap, fetch_reporter,
+    highlight_candidates, load_annual,
+)
+from annual_pdf import build_annual_pdf
 
 REPORT_WINDOW_DAYS = 3  # 배포일 이후 며칠까지 검색할지 (고정)
 
@@ -104,7 +110,7 @@ if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
         "로컬 실행 시 `.streamlit/secrets.toml`에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 등록하세요."
     )
 
-tab1, tab2, tab3 = st.tabs(["📄 보도자료 결과보고서", "📅 월간 PR리포트", "🔎 네이버 기사 수집"])
+tab1, tab2, tab_y, tab3 = st.tabs(["📄 보도자료 결과보고서", "📅 월간 PR리포트", "📆 연간 PR리포트", "🔎 네이버 기사 수집"])
 
 # ------------------------------------------------------------------
 # 탭 1: 결과보고서
@@ -906,6 +912,179 @@ with tab2:
                 _, m_mid, _ = st.columns([1, 6, 1])
                 for img in m_pages:
                     m_mid.image(img, width="stretch")
+
+# ------------------------------------------------------------------
+# 탭: 연간 PR리포트 (월간 PR리포트 엑셀로 1년 치 집계)
+# ------------------------------------------------------------------
+with tab_y:
+    st.caption(
+        "월간 PR리포트 엑셀로 1년 치를 모아 연간 PDF를 만듭니다. 올해는 **가장 최근 달 엑셀 하나**(1월~그 달 시트가 모두 들어 있음), "
+        "지난 해는 **해마다 12월 엑셀**을 올리면 전년 대비·연도별 추이가 함께 나옵니다."
+    )
+    yc1, yc2 = st.columns(2)
+    y_cur = yc1.file_uploader("올해 PR리포트 엑셀 (가장 최근 달 파일)", type=["xlsx"], key="y_cur")
+    y_prev = yc2.file_uploader("지난 해 PR리포트 엑셀 (해마다 12월 파일, 여러 개 가능)", type=["xlsx"],
+                               accept_multiple_files=True, key="y_prev")
+    if y_cur is not None:
+        y_key = (y_cur.file_id, tuple(f.file_id for f in y_prev or []))
+        if st.session_state.get("y_key") != y_key:
+            st.session_state["y_key"] = y_key
+            try:
+                with st.spinner("엑셀 읽는 중..."):
+                    st.session_state["annual"] = load_annual(y_cur.getvalue(), [f.getvalue() for f in y_prev or []])
+            except Exception as e:
+                st.session_state["annual"] = None
+                st.error(f"엑셀을 읽지 못했습니다: {e}")
+            st.session_state["y_run"] = st.session_state.get("y_run", 0) + 1
+    Y = st.session_state.get("annual") if y_cur is not None else None
+    if Y:
+        run = st.session_state["y_run"]
+        partial = Y["last_month"] < 12
+        st.success(f"{Y['company']} {Y['year']}년 1~{Y['last_month']}월 · 주요 기사 {len(Y['articles'])}건 · "
+                   f"보도자료 {len(Y['releases'])}건 · 기자 미팅 {len(Y['meetings'])}회"
+                   + (" · 지난 해 " + ", ".join(f"{p['year']}년" for p in Y["prev_years"]) if Y["prev_years"] else ""))
+        if not any(p["year"] == Y["year"] - 1 for p in Y["prev_years"]):
+            st.info(f"{Y['year'] - 1}년 엑셀이 없어 전년 대비 수치와 월별 추이의 전년 점선은 빠집니다.")
+        elif partial:
+            st.caption(f"올해가 {Y['last_month']}월까지라 전년 대비는 {Y['year'] - 1}년 1~{Y['last_month']}월과 비교합니다.")
+        y_company = st.text_input("PDF에 표시할 고객사명", value=Y["company"], key=f"y_company_{run}")
+
+        # ① 보도자료
+        st.markdown("##### ① 보도자료 확인")
+        st.caption("달마다 보도자료 표를 모아 달을 넘겨 이어 실린 건은 하나로 합쳤습니다. **배포일**은 그 달 보도자료 기사가 몰린 날짜로, "
+                   "**주제**는 제목으로 추정했으니 확인하세요. 배포일로 요일별 평균과 주요 매체 수를 셉니다.")
+        rel_df = st.data_editor(
+            pd.DataFrame([{"보도자료": r["title"], "배포일": r["date"], "주제": r["topic"], "게재 수": r["n"]} for r in Y["releases"]],
+                         columns=["보도자료", "배포일", "주제", "게재 수"]),
+            hide_index=True, width="stretch", num_rows="dynamic", key=f"y_rel_{run}",
+            column_config={
+                "보도자료": st.column_config.TextColumn("보도자료", width="large"),
+                "배포일": st.column_config.DateColumn("배포일", format="YYYY-MM-DD"),
+                "주제": st.column_config.SelectboxColumn("주제", options=TOPICS),
+                "게재 수": st.column_config.NumberColumn("게재 수", min_value=0, step=1),
+            },
+        )
+        y_releases = []
+        for _, r in rel_df.iterrows():
+            t = "" if pd.isna(r["보도자료"]) else str(r["보도자료"]).strip()
+            if t:
+                dd = r["배포일"]
+                y_releases.append({"title": t, "date": dd if isinstance(dd, date) and not pd.isna(dd) else None,
+                                   "topic": "" if pd.isna(r["주제"]) else str(r["주제"]),
+                                   "n": 0 if pd.isna(r["게재 수"]) else int(r["게재 수"])})
+        if any(r["date"] is None for r in y_releases):
+            st.warning("배포일이 빈 보도자료가 있습니다. 배포일을 넣어야 요일별 평균·주요 매체 수에 들어갑니다.")
+
+        # ② 하이라이트
+        st.markdown("##### ② 하이라이트 (최대 6건)")
+        st.caption("인터뷰·기획·기고 기사와 보도자료마다 대표 기사(매체 영향력이 가장 큰 기사)입니다. "
+                   "가장 많이 실린 보도자료와 인터뷰를 먼저 골라 두었습니다. PDF 카드를 누르면 기사로 이동합니다.")
+        _kname = {"release": "보도자료", "plan": "기획", "interview": "인터뷰", "contrib": "기고"}
+        cands = highlight_candidates(Y["articles"], y_releases)
+        picked = default_highlights(cands, y_releases)
+        hl_df = st.data_editor(
+            pd.DataFrame([{"넣기": (a["url"] or a["title"]) in picked, "형식": _kname[a["kind"]], "매체": a["media"],
+                           "제목": a["title"], "게재일": a["date"], "URL": a["url"]} for a in cands],
+                         columns=["넣기", "형식", "매체", "제목", "게재일", "URL"]),
+            hide_index=True, width="stretch", height=min(38 + 35 * max(len(cands), 1), 420),
+            disabled=["형식", "매체", "제목", "게재일", "URL"], key=f"y_hl_{run}",
+            column_config={
+                "넣기": st.column_config.CheckboxColumn("넣기", width="small"),
+                "제목": st.column_config.TextColumn("제목", width="large"),
+                "게재일": st.column_config.DateColumn("게재일", format="MM-DD", width="small"),
+                "URL": st.column_config.LinkColumn("원문", display_text="열기", width="small"),
+            },
+        )
+        y_highlights = [a for (_, r), a in zip(hl_df.iterrows(), cands) if bool(r["넣기"])]
+        if len(y_highlights) > 6:
+            st.warning(f"{len(y_highlights)}건을 골랐습니다. PDF에는 게재일 순으로 앞 6건만 들어갑니다.")
+
+        # ③ 포털 · 기자명 (엑셀에 없어서 기사마다 확인)
+        st.markdown("##### ③ 포털·기자명 확인")
+        st.caption("엑셀에는 포털(네이버 CP·검색제휴·다음·구글)과 기자명이 없어서 기사마다 확인합니다 (1~2분). "
+                   "확인하기 전에는 PDF에서 '포털별 게재 수'와 '기자 TOP 5'가 빠집니다. 기자명은 기사 본문의 'OOO 기자'를 읽은 것이라 아래 표에서 고칠 수 있습니다.")
+        if st.button("🔎 포털·기자명 확인", key=f"y_check_{run}", disabled=not Y["articles"]):
+            arts = Y["articles"]
+            bar = st.progress(0.0, text="기사 확인 중...")
+
+            def _check(a):
+                portal = check_portal(a, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET) if NAVER_CLIENT_ID and a["title"] else None
+                return portal, fetch_reporter(a["url"]) if a["url"] else ""
+
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                futs = {pool.submit(_check, a): a for a in arts}
+                for n, fut in enumerate(as_completed(futs), 1):
+                    a = futs[fut]
+                    try:
+                        a["portal"], a["reporter"] = fut.result()
+                    except Exception:
+                        a["portal"], a["reporter"] = None, ""
+                    bar.progress(n / len(arts), text=f"기사 확인 [{n}/{len(arts)}]")
+            bar.empty()
+            st.session_state["y_rep_ver"] = st.session_state.get("y_rep_ver", 0) + 1
+        y_articles = Y["articles"]
+        if any(a["reporter"] is not None for a in Y["articles"]):
+            rep_df = st.data_editor(
+                pd.DataFrame([{"매체": a["media"], "제목": a["title"], "기자": a["reporter"] or "", "포털": a["portal"]}
+                              for a in Y["articles"]], columns=["매체", "제목", "기자", "포털"]).astype({"기자": "str"}),
+                hide_index=True, width="stretch", height=320, disabled=["매체", "제목"],
+                key=f"y_rep_{run}_{st.session_state.get('y_rep_ver', 0)}",
+                column_config={"제목": st.column_config.TextColumn("제목", width="large"),
+                               "포털": st.column_config.SelectboxColumn("포털", options=PORTALS)},
+            )
+            y_articles = [dict(a, reporter=("" if pd.isna(r["기자"]) else str(r["기자"]).strip()),
+                               portal=(None if pd.isna(r["포털"]) else r["포털"]))
+                          for (_, r), a in zip(rep_df.iterrows(), Y["articles"])]
+            n_named = sum(1 for a in y_articles if a["reporter"])
+            st.caption(f"기자명을 찾은 기사 {n_named}/{len(y_articles)}건 · 빈 칸은 기자 TOP 5 집계에서 빠집니다.")
+        y_base = dict(Y, articles=y_articles)
+
+        # ④ 요약 · 총 정리 (표 내용으로 쓴 초안, 직접 고치면 그대로 둠)
+        draft = compose_annual(y_base, y_company.strip() or Y["company"], y_releases, y_highlights, "", {})
+        st.markdown("##### ④ 올해의 요약")
+        s_key, s_auto = f"y_summary_{run}", f"y_summary_auto_{run}"
+        auto_s = default_summary(draft)
+        if s_key not in st.session_state or st.session_state[s_key] == st.session_state.get(s_auto):
+            st.session_state[s_key] = auto_s
+        st.session_state[s_auto] = auto_s
+        y_summary = st.text_area("PDF 1쪽에 들어갑니다 · 자동으로 쓴 초안이니 자유롭게 고치세요 (비우면 빠짐)", height=110, key=s_key)
+
+        st.markdown("##### ⑤ 총 정리")
+        st.caption("한 줄이 PDF에서 한 항목이 됩니다. 수치로 쓸 수 있는 줄만 미리 채웠으니 나머지는 직접 써 주세요. 세 칸 모두 비우면 총 정리는 빠집니다.")
+        auto_w = default_wrap(draft)
+        y_wrap = {}
+        wcols = st.columns(3)
+        for col, (k, label) in zip(wcols, (("good", "잘 된 점"), ("bad", "아쉬운 점"), ("plan", f"{Y['year'] + 1} 제언"))):
+            wk, wa = f"y_wrap_{k}_{run}", f"y_wrap_{k}_auto_{run}"
+            text = "\n".join(auto_w[k])
+            if wk not in st.session_state or st.session_state[wk] == st.session_state.get(wa):
+                st.session_state[wk] = text
+            st.session_state[wa] = text
+            y_wrap[k] = [x for x in col.text_area(label, height=150, key=wk).splitlines() if x.strip()]
+
+        y_data = compose_annual(y_base, y_company.strip() or Y["company"], y_releases, y_highlights, y_summary, y_wrap)
+        try:
+            y_pdf = build_annual_pdf(y_data)
+        except Exception as e:
+            st.error(f"PDF를 만들지 못했습니다: {e}")
+            y_pdf = None
+        yb1, yb2 = st.columns(2)
+        if y_pdf:
+            yb1.download_button("📑 연간 PDF 리포트 다운로드", data=y_pdf,
+                                file_name=f"{Y['year']}년_{y_data['company']}_연간_PR리포트.pdf", mime="application/pdf",
+                                type="primary", width="stretch", on_click="ignore", key="y_dl_pdf")
+        y_open = st.session_state.get("y_preview_open", False)
+        if yb2.button("🙈 미리보기 닫기" if y_open else "👁 PDF 미리보기", width="stretch", key="y_preview_btn", disabled=not y_pdf):
+            st.session_state["y_preview_open"] = not y_open
+            st.rerun()
+        if y_open and y_pdf:
+            with st.container(border=True):
+                with st.spinner("미리보기 만드는 중..."):
+                    y_pages = _pdf_page_images(y_pdf)
+                st.caption(f"PDF 미리보기 · {len(y_pages)}쪽 — 위에서 표·입력을 바꾸면 바로 반영됩니다.")
+                _, y_mid, _ = st.columns([1, 6, 1])
+                for img in y_pages:
+                    y_mid.image(img, width="stretch")
 
 # ------------------------------------------------------------------
 # 탭 3: 네이버 기사 수집

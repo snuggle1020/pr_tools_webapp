@@ -99,10 +99,13 @@ def month_sheets(file):
     return names
 
 
-def read_month_report(file, sheet_name):
-    """월간 PR리포트 엑셀의 한 달 시트를 읽어 PDF에 필요한 값을 돌려준다."""
-    file.seek(0)
-    wb = openpyxl.load_workbook(file, data_only=True)
+def read_month_report(file, sheet_name, wb=None):
+    """월간 PR리포트 엑셀의 한 달 시트를 읽어 PDF에 필요한 값을 돌려준다.
+    wb: 여러 달을 읽을 때 한 번 연 통합문서를 넘기면 다시 열지 않음 (연간 리포트)."""
+    own = wb is None
+    if own:
+        file.seek(0)
+        wb = openpyxl.load_workbook(file, data_only=True)
     ws = wb[sheet_name]
     month = int(re.sub(r"\D", "", sheet_name))
     sec = _sections(ws)
@@ -152,7 +155,8 @@ def read_month_report(file, sheet_name):
     if year is None:
         dates = [a["date"] for a in arts if a["date"]]
         year = dates[0].year if dates else date.today().year
-    wb.close()
+    if own:
+        wb.close()
 
     return {"company": company, "year": year, "month": month, "types": types, "releases": releases,
             "articles": arts, "mentions": mentions, "meetings": meetings, "plans": plans,
