@@ -181,22 +181,47 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
             "releases": rels, "articles": main, "mentions": mentions,
             "meetings": [x for x in meetings if any(x)], "plans": [p for p in plans if any(p)],
             "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend,
-            "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows}}
+            "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows,
+                        "detail": month_detail(main, rels, dates, [x for x in meetings if any(x)])}}
     return data, dates, blank
+
+
+def month_detail(main, rels, dates, meetings):
+    """연간 리포트가 월간 PDF에서 다시 읽는 이번 달 원본 (PDF에 월별 기록과 함께 숨겨 넣음).
+    주요 기사(단순언급 제외)·보도자료(제목·배포일·게재 수, 게재 후 삭제 건은 뺌)·기자 미팅."""
+    d = lambda x: x.isoformat() if x else None
+    return {
+        "articles": [{"media": a["media"], "title": a["title"], "url": a["url"], "date": d(a["date"]), "kind": a["kind"]}
+                     for a in main],
+        "releases": [{"title": r["title"], "date": d(dt), "count": r["count"]}
+                     for r, dt in zip(rels, dates) if not r["deleted"]],
+        "meetings": [list(x) for x in meetings],
+    }
 
 
 # ---------------------------------------------------------------- 월별 기록 불러오기
 
-def history_from_secrets(secrets, company, year):
-    """Streamlit Secrets 의 [monthly_history."고객사"."연도"] 에 넣어 둔 형식별 1~12월 건수 (저장소가 공개라 코드 대신 Secrets에 둠).
-    고객사 이름은 그대로 또는 서로 포함되면 맞는 것으로 본다. 없으면 None."""
+def history_entry(secrets, company, year):
+    """Streamlit Secrets 의 [monthly_history."고객사"."연도"] 표 (저장소가 공개라 코드 대신 Secrets에 둠).
+    고객사 이름은 그대로 또는 서로 포함되면 맞는 것으로 본다. 없으면 None.
+    형식별 1~12월 건수 외에 연간 리포트용 '보도자료 배포'(그해 보도자료 수)가 들어 있을 수 있다."""
     try:
         hist = secrets["monthly_history"]
         name = next((k for k in hist if k == company), None) or next(
             (k for k in hist if k in company or company in k), None)
         if name is None or str(year) not in hist[name]:
             return None
-        src = hist[name][str(year)]
+        return hist[name][str(year)]
+    except Exception:
+        return None
+
+
+def history_from_secrets(secrets, company, year):
+    """Secrets 에 넣어 둔 형식별 1~12월 건수 {형식: [12]}. 없으면 None."""
+    src = history_entry(secrets, company, year)
+    if src is None:
+        return None
+    try:
         return {k: [int(x) for x in (list(src.get(k, [])) + [0] * 12)[:12]] for k in TYPE_ORDER}
     except Exception:
         return None

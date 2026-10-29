@@ -3,7 +3,7 @@
 PR 리포트 도구 웹앱.
 - 탭1: 결과보고서 (보도자료 1건 배포 결과 - 네이버 뉴스 수집 후 엑셀 시트 + PDF 보고서 생성)
 - 탭2: 월간 PR리포트 (한 달 기사 수집·자동분류 -> 앱에서 확인·수정 -> PDF, 월별 기록은 PDF에 숨겨 다음 달로 이어감)
-- 탭3: 연간 PR리포트 (월간 PR리포트 엑셀로 1년 치 집계 -> 보도자료·하이라이트·포털·기자명 확인 -> PDF)
+- 탭3: 연간 PR리포트 (월간 PDF·PR리포트 엑셀로 1년 치 집계 -> 보도자료·하이라이트·포털·기자명 확인 -> PDF)
 
 네이버 API 키는 Streamlit Cloud의 App settings > Secrets 에
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 로 등록해두면 자동으로 읽힘.
@@ -36,7 +36,7 @@ from monthly_report import (
     dump_work as dump_month_work, load_work as load_month_work,
 )
 from annual_report import (
-    PORTALS, TOPICS, check_portal, compose_annual, default_highlights, default_summary, default_wrap, fetch_reporter,
+    PORTALS, TOPICS, add_saved_years, check_portal, compose_annual, default_highlights, default_summary, default_wrap, fetch_reporter,
     highlight_candidates, load_annual,
 )
 from annual_pdf import build_annual_pdf
@@ -918,33 +918,45 @@ with tab2:
 # ------------------------------------------------------------------
 with tab_y:
     st.caption(
-        "월간 PR리포트 엑셀로 1년 치를 모아 연간 PDF를 만듭니다. 올해는 **가장 최근 달 엑셀 하나**(1월~그 달 시트가 모두 들어 있음), "
-        "지난 해는 **해마다 12월 엑셀**을 올리면 전년 대비·연도별 추이가 함께 나옵니다."
+        "월간 PR리포트 탭에서 만든 **월간 PDF**(1월~12월)를 한꺼번에 올리면 1년 치를 모아 연간 PDF를 만듭니다. "
+        "앱 이전에 엑셀로 만든 달이 있으면 그 해 **가장 최근 달 PR리포트 엑셀**도 함께 올리세요 (같은 달은 PDF가 우선). "
+        "지난 해 건수는 앱에 저장해 둔 기록(Secrets의 monthly_history)을 쓰고, 없으면 지난 해 12월 엑셀을 올리면 됩니다."
     )
+    y_pdfs = st.file_uploader("올해 월간 PDF (이 앱에서 만든 월간 PR리포트, 여러 개)", type=["pdf"],
+                              accept_multiple_files=True, key="y_pdfs")
     yc1, yc2 = st.columns(2)
-    y_cur = yc1.file_uploader("올해 PR리포트 엑셀 (가장 최근 달 파일)", type=["xlsx"], key="y_cur")
-    y_prev = yc2.file_uploader("지난 해 PR리포트 엑셀 (해마다 12월 파일, 여러 개 가능)", type=["xlsx"],
+    y_cur = yc1.file_uploader("올해 PR리포트 엑셀 (엑셀로 만든 달이 있을 때 · 가장 최근 달 파일)", type=["xlsx"], key="y_cur")
+    y_prev = yc2.file_uploader("지난 해 PR리포트 엑셀 (저장된 기록이 없을 때 · 해마다 12월 파일)", type=["xlsx"],
                                accept_multiple_files=True, key="y_prev")
-    if y_cur is not None:
-        y_key = (y_cur.file_id, tuple(f.file_id for f in y_prev or []))
+    y_has = bool(y_pdfs) or y_cur is not None
+    if y_has:
+        y_key = (tuple(f.file_id for f in y_pdfs or []), y_cur.file_id if y_cur else None,
+                 tuple(f.file_id for f in y_prev or []))
         if st.session_state.get("y_key") != y_key:
             st.session_state["y_key"] = y_key
             try:
-                with st.spinner("엑셀 읽는 중..."):
-                    st.session_state["annual"] = load_annual(y_cur.getvalue(), [f.getvalue() for f in y_prev or []])
+                with st.spinner("파일 읽는 중..."):
+                    base_y = load_annual(y_cur.getvalue() if y_cur else None, [f.getvalue() for f in y_prev or []],
+                                         [f.getvalue() for f in y_pdfs or []])
+                    base_y["saved_years"] = add_saved_years(base_y, st.secrets)
+                    st.session_state["annual"] = base_y
             except Exception as e:
                 st.session_state["annual"] = None
-                st.error(f"엑셀을 읽지 못했습니다: {e}")
+                st.error(f"파일을 읽지 못했습니다: {e}")
             st.session_state["y_run"] = st.session_state.get("y_run", 0) + 1
-    Y = st.session_state.get("annual") if y_cur is not None else None
+    Y = st.session_state.get("annual") if y_has else None
     if Y:
         run = st.session_state["y_run"]
         partial = Y["last_month"] < 12
         st.success(f"{Y['company']} {Y['year']}년 1~{Y['last_month']}월 · 주요 기사 {len(Y['articles'])}건 · "
                    f"보도자료 {len(Y['releases'])}건 · 기자 미팅 {len(Y['meetings'])}회"
-                   + (" · 지난 해 " + ", ".join(f"{p['year']}년" for p in Y["prev_years"]) if Y["prev_years"] else ""))
+                   + (" · 지난 해 " + ", ".join(f"{p['year']}년" + ("(저장된 기록)" if p.get("saved") else "") for p in Y["prev_years"])
+                      if Y["prev_years"] else ""))
+        for note in Y.get("notes", []):
+            st.warning(note)
         if not any(p["year"] == Y["year"] - 1 for p in Y["prev_years"]):
-            st.info(f"{Y['year'] - 1}년 엑셀이 없어 전년 대비 수치와 월별 추이의 전년 점선은 빠집니다.")
+            st.info(f"{Y['year'] - 1}년 기록이 없어 전년 대비 수치와 월별 추이의 전년 점선은 빠집니다. "
+                    f"{Y['year'] - 1}년 12월 PR리포트 엑셀을 올리면 들어갑니다.")
         elif partial:
             st.caption(f"올해가 {Y['last_month']}월까지라 전년 대비는 {Y['year'] - 1}년 1~{Y['last_month']}월과 비교합니다.")
         y_company = st.text_input("PDF에 표시할 고객사명", value=Y["company"], key=f"y_company_{run}")
@@ -1001,7 +1013,7 @@ with tab_y:
 
         # ③ 포털 · 기자명 (엑셀에 없어서 기사마다 확인)
         st.markdown("##### ③ 포털·기자명 확인")
-        st.caption("엑셀에는 포털(네이버 CP·검색제휴·다음·구글)과 기자명이 없어서 기사마다 확인합니다 (1~2분). "
+        st.caption("월간 리포트에는 포털(네이버 CP·검색제휴·다음·구글)과 기자명이 없어서 기사마다 확인합니다 (1~2분). "
                    "확인하기 전에는 PDF에서 '포털별 게재 수'와 '기자 TOP 5'가 빠집니다. 기자명은 기사 본문의 'OOO 기자'를 읽은 것이라 아래 표에서 고칠 수 있습니다.")
         if st.button("🔎 포털·기자명 확인", key=f"y_check_{run}", disabled=not Y["articles"]):
             arts = Y["articles"]

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 연간 PR리포트 데이터 처리.
-  - 월간 PR리포트 엑셀(올해 가장 최근 달 파일 하나 + 지난 해 12월 파일들)에서 달마다 형식별 건수·보도자료·기사·기자 미팅을 읽음
+  - 이 앱이 만든 월간 PDF(숨겨 둔 그달 기사·보도자료·미팅)와 월간 PR리포트 엑셀(앱 이전 달, 지난 해 12월 파일)에서 달마다 형식별 건수·보도자료·기사·기자 미팅을 읽음
   - 보도자료는 달을 넘겨 이어 실린 것까지 제목으로 합치고, 배포일은 그 달 보도자료 기사가 몰린 날짜로 추정 (앱에서 고침)
   - 매체·포털·기자 통계는 '주요 기사' 목록(보도자료·기획·인터뷰·기고) 기준. 단순언급은 엑셀에 대표 기사만 있어 형식별 건수에만 들어감
   - 포털(네이버 CP·검색제휴·다음·구글)과 기자명은 엑셀에 없어서 앱에서 버튼으로 확인 (check_portal / fetch_reporter)
@@ -18,8 +18,8 @@ import requests
 
 from article_meta import _UA, normalize_url
 from media_order import MEDIA_GROUPS, media_category, media_sort_key
-from monthly_pdf import assign_release, read_month_report
-from monthly_report import _bigrams
+from monthly_pdf import assign_release, read_history, read_month_report
+from monthly_report import _bigrams, history_entry, history_from_secrets
 from pr_report_core import _decode_html, clean_html
 
 # PDF 형식 5가지: (키, 이름, 엑셀 형식 이름들)
@@ -99,10 +99,12 @@ def year_releases(months):
                 continue
             if key not in index:
                 index[key] = len(out)
-                out.append({"title": r["title"], "n": 0, "months": []})
+                out.append({"title": r["title"], "n": 0, "months": [], "date": None})
             rec = out[index[key]]
             rec["n"] += r["count"]
             rec["months"].append(m)
+            if r.get("date") and not rec["date"]:
+                rec["date"] = r["date"]
     return out
 
 
@@ -123,7 +125,8 @@ def guess_release_dates(months, releases):
     (엑셀 보도자료 표에는 날짜가 없음) 못 찾으면 None. releases 에 'date' 를 채운다."""
     by_month = {}
     for r in releases:
-        by_month.setdefault(r["months"][0], []).append(r)
+        if not r.get("date"):  # 월간 PDF에서 온 보도자료는 배포일이 이미 있음
+            by_month.setdefault(r["months"][0], []).append(r)
     for m, rels in by_month.items():
         cl = _clusters([a for a in months[m]["articles"] if kind5(a["kind"]) == "release"])
         used = set()
@@ -157,16 +160,71 @@ def guess_topic(title):
     return "제품·서비스"
 
 
-def load_annual(cur_raw: bytes, prev_raws=()):
-    """앱에 올린 엑셀들 -> 앱 편집 전 기본 데이터."""
-    cur = read_year_excel(cur_raw)
+def read_month_pdf(raw: bytes):
+    """이 앱이 만든 월간 PDF에 숨겨 둔 기록 -> (회사, 연도, 월, 이번 달 데이터|None, 형식별 1~12월 건수).
+    이번 달 데이터(기사·보도자료·미팅)는 2026년 10월 리포트부터 들어 있음. 기록이 없는 PDF면 ValueError."""
+    h = read_history(raw)
+    if not h:
+        raise ValueError("이 앱의 월간 PR리포트 탭에서 만든 PDF가 아닙니다 (숨겨 둔 기록이 없음).")
+    det = h.get("detail")
+    month = None
+    if det:
+        d = lambda x: date.fromisoformat(x) if x else None
+        m = h["month"]
+        month = {
+            "month": m, "company": h["company"], "year": h["year"],
+            "types": {k: h["rows"][k][m - 1] for k in h["rows"]},
+            "articles": [dict(a, date=d(a.get("date"))) for a in det.get("articles", [])],
+            "releases": [{"title": r["title"], "count": int(r.get("count") or 0), "date": d(r.get("date"))}
+                         for r in det.get("releases", [])],
+            "meetings": [tuple((list(x) + ["", "", ""])[:3]) for x in det.get("meetings", [])],
+        }
+    return h["company"], h["year"], h["month"], month, h["rows"]
+
+
+def load_annual(cur_raw=None, prev_raws=(), pdf_raws=()):
+    """앱에 올린 파일들 -> 앱 편집 전 기본 데이터.
+    cur_raw: 올해 PR리포트 엑셀(앱 전에 엑셀로 만든 달) / pdf_raws: 올해 월간 PDF들 (같은 달은 PDF가 우선)
+    prev_raws: 지난 해 12월 엑셀들. 반환에 'notes' (사용자에게 보여 줄 안내) 포함."""
+    months, company, year, notes = {}, None, None, []
+    if cur_raw:
+        cur = read_year_excel(cur_raw)
+        months.update(cur["months"])
+        company, year = cur["company"], cur["year"]
+    rows_all = None  # 가장 늦은 달 PDF의 형식별 1~12월 건수 (기사 목록이 없는 달 건수 채우기용)
+    latest = 0
+    for raw in pdf_raws:
+        c, y, m, month, rows = read_month_pdf(raw)
+        if year is None:
+            company, year = c, y
+        if y != year:
+            notes.append(f"{y}년 {m}월 PDF는 {year}년이 아니라 뺐습니다.")
+            continue
+        if m >= latest:
+            latest, rows_all = m, rows
+        if month:
+            months[m] = month
+        else:
+            notes.append(f"{m}월 PDF에는 기사 목록이 없어(이전 버전으로 만든 PDF) 건수만 씁니다.")
+    if year is None:
+        raise ValueError("올해 월간 PDF나 PR리포트 엑셀을 올려 주세요.")
     prev = []
     for raw in prev_raws:
         y = read_year_excel(raw)
-        if y["year"] != cur["year"]:
+        if y["year"] != year:
             prev.append(y)
     prev.sort(key=lambda y: y["year"])
-    months = cur["months"]
+    monthly = month_types(months)
+    if rows_all:  # 기사 목록은 없지만 PDF 기록에 건수가 있는 달
+        for i in range(latest):
+            if i + 1 not in months:
+                for k, _, names in TYPES5:
+                    monthly[k][i] = sum(rows_all.get(n, [0] * 12)[i] for n in names)
+    last = max([latest] + list(months))
+    missing = [m for m in range(1, last + 1) if m not in months]
+    if missing:
+        notes.append("기사 목록이 없는 달: " + ", ".join(f"{m}월" for m in missing)
+                     + " (월별 건수에는 들어가지만 매체·보도자료·하이라이트 집계에서는 빠집니다)")
     releases = guess_release_dates(months, year_releases(months))
     for r in releases:
         r["topic"] = guess_topic(r["title"])
@@ -181,8 +239,8 @@ def load_annual(cur_raw: bytes, prev_raws=()):
     meetings = [{"month": m, "media": canon_media(x[0]), "reporter": x[1].strip(), "memo": x[2].strip()}
                 for m in sorted(months) for x in months[m]["meetings"] if (x[0] or "").strip()]
     return {
-        "company": cur["company"], "year": cur["year"], "last_month": max(months),
-        "monthly": month_types(months), "releases": releases, "articles": articles, "meetings": meetings,
+        "company": company, "year": year, "last_month": last,
+        "monthly": monthly, "releases": releases, "articles": articles, "meetings": meetings, "notes": notes,
         "prev_years": [{"year": y["year"], "monthly": month_types(y["months"]),
                         "releases": len(year_releases(y["months"]))} for y in prev],
     }
@@ -429,3 +487,28 @@ def default_highlights(cands, releases, n=6):
         seen.add(_norm_title(a["title"])[:20])
         picked.append(a)
     return {a["url"] or a["title"] for a in picked}
+
+
+# ---------------------------------------------------------------- 저장해 둔 지난 해 기록 (Secrets)
+
+def add_saved_years(base, secrets, back=6):
+    """올리지 않은 지난 해는 Secrets [monthly_history."고객사"."연도"] 에 저장해 둔 기록으로 채운다.
+    (형식별 1~12월 건수 + '보도자료 배포' 수). 채운 연도 목록을 돌려준다."""
+    have = {p["year"] for p in base["prev_years"]}
+    added = []
+    for y in range(base["year"] - back, base["year"]):
+        if y in have:
+            continue
+        rows = history_from_secrets(secrets, base["company"], y)
+        if not rows or not any(sum(v) for v in rows.values()):
+            continue
+        src = history_entry(secrets, base["company"], y) or {}
+        try:
+            rel = int(src.get("보도자료 배포", 0))
+        except Exception:
+            rel = 0
+        base["prev_years"].append({"year": y, "releases": rel, "saved": True,
+                                   "monthly": {k: [sum(rows[n][i] for n in names) for i in range(12)] for k, _, names in TYPES5}})
+        added.append(y)
+    base["prev_years"].sort(key=lambda p: p["year"])
+    return added
