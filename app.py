@@ -681,24 +681,33 @@ with tab2:
         # ① 보도자료
         st.markdown("##### ① 이번 달 배포한 보도자료")
         st.caption("보도자료 기사가 몰린 날짜로 미리 채웠습니다. 제목·배포일을 확인하고 고치세요. 빠진 건은 추가, 틀린 건은 삭제하세요. "
-                   "형식이 '보도자료'인 기사는 배포일 기준으로 각 보도자료에 자동으로 묶입니다.")
+                   "형식이 '보도자료'인 기사는 배포일 기준으로 각 보도자료에 자동으로 묶입니다. "
+                   "기사가 실렸다가 삭제 요청한 보도자료는 **게재 후 삭제**에 체크하고, 삭제 전 실렸던 기사 수를 **게재 건수**에 넣으세요 "
+                   "(네이버에서 기사가 사라져 자동으로 셀 수 없음). PDF 카드에는 회색으로 그 건수가 나오고, 총 보도·배포 건수 집계에서는 빠집니다.")
         # 표(data_editor) 칸에서는 한글 입력이 Enter 때 날아가는 일이 있어서, 보도자료는 줄마다 일반 입력칸으로 받음
         rows_key = f"m_rel_rows_{run}"
         if rows_key not in st.session_state:
-            st.session_state[rows_key] = [{"id": i, "title": r["title"], "date": r["date"]}
+            st.session_state[rows_key] = [{"id": i, "title": r["title"], "date": r["date"], "deleted": r.get("deleted", False),
+                                           "count": r.get("count", 0)}
                                           for i, r in enumerate(M["releases"])]
         rel_rows = st.session_state[rows_key]
         for r in rel_rows:
-            c1, c2, c3 = st.columns([7, 2, 1], vertical_alignment="bottom")
+            c1, c2, c4, c5, c3 = st.columns([5.5, 2, 1.4, 1.3, 1], vertical_alignment="bottom")
             r["title"] = c1.text_input("보도자료 제목", value=r["title"], key=f"m_rel_t_{run}_{r['id']}")
             r["date"] = c2.date_input("배포일", value=r["date"], format="YYYY-MM-DD", key=f"m_rel_d_{run}_{r['id']}")
+            r["deleted"] = c4.checkbox("게재 후 삭제", value=r.get("deleted", False), key=f"m_rel_del_{run}_{r['id']}")
+            if r["deleted"]:
+                r["count"] = c5.number_input("게재 건수", min_value=0, step=1, value=int(r.get("count") or 0),
+                                             key=f"m_rel_n_{run}_{r['id']}")
             if c3.button("삭제", key=f"m_rel_x_{run}_{r['id']}", width="stretch"):
                 st.session_state[rows_key] = [x for x in rel_rows if x["id"] != r["id"]]
                 st.rerun()
         if st.button("➕ 보도자료 추가", key=f"m_rel_add_{run}"):
-            rel_rows.append({"id": max((x["id"] for x in rel_rows), default=-1) + 1, "title": "", "date": None})
+            rel_rows.append({"id": max((x["id"] for x in rel_rows), default=-1) + 1, "title": "", "date": None, "deleted": False, "count": 0})
             st.rerun()
-        releases = [{"title": r["title"].strip(), "date": r["date"]} for r in rel_rows if r["title"].strip()]
+        releases = [{"title": r["title"].strip(), "date": r["date"], "deleted": r.get("deleted", False),
+                     "count": int(r.get("count") or 0)}
+                    for r in rel_rows if r["title"].strip()]
         releases.sort(key=lambda r: r["date"] or date.max)
         if any(r["date"] is None for r in releases):
             st.warning("배포일이 비어 있는 보도자료가 있습니다. 배포일을 넣어야 그 보도자료 기사가 묶여서 게재 수가 셉니다.")

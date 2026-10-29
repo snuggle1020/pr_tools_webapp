@@ -138,19 +138,23 @@ def auto_group_mentions(articles):
 
 def compose(meta, articles, releases, meetings, plans, trend_rows):
     """meta: {'company','year','month'} / articles: [{'url','media','title','date','kind','include','group'}]
-    releases: [{'title','date'}] / meetings, plans: [(a,b,c)] / trend_rows: 월별 기록 {형식: [12]} 또는 None.
+    releases: [{'title','date','deleted','count'(삭제 건만 직접 넣은 게재 수)}] / meetings, plans: [(a,b,c)] / trend_rows: 월별 기록 {형식: [12]} 또는 None.
     반환: (monthly_pdf 용 data, 보도자료 배포일 목록, 형식 미지정 기사 수)
-    이번 달 칸은 표에서 센 값으로 덮어쓰고, 그 기록을 data['history'] 로 PDF에 숨겨 넣게 한다."""
-    used = [a for a in articles if a["include"] and a["kind"]]
-    blank = sum(1 for a in articles if a["include"] and not a["kind"])
+    이번 달 칸은 표에서 센 값으로 덮어쓰고, 그 기록을 data['history'] 로 PDF에 숨겨 넣게 한다.
+    '게재 후 삭제'한 보도자료의 기사는 건수·기사 목록·월별 기록에서 모두 뺀다 (카드만 회색으로 남김)."""
     dates = [r["date"] for r in releases]
+    gone = {i for i, r in enumerate(releases) if r.get("deleted")}
+    used = [a for a in articles if a["include"] and a["kind"] and assign_release(a, dates) not in gone]
+    blank = sum(1 for a in articles if a["include"] and not a["kind"])
 
     types = {k: 0 for k in TYPE_ORDER}
     for a in used:
         types[a["kind"]] = types.get(a["kind"], 0) + 1
 
     rel_counts = Counter(assign_release(a, dates) for a in used)
-    rels = [{"title": r["title"], "count": rel_counts.get(i, 0)} for i, r in enumerate(releases)]
+    rels = [{"title": r["title"], "deleted": bool(r.get("deleted")),
+             "count": int(r.get("count") or 0) if r.get("deleted") else rel_counts.get(i, 0)}
+            for i, r in enumerate(releases)]
 
     main = [{"media": a["media"], "title": a["title"], "url": a["url"], "date": a["date"], "kind": a["kind"]}
             for a in sort_articles(a for a in used if a["kind"] != "단순언급")]
@@ -217,7 +221,8 @@ def dump_work(meta, articles, releases, meetings, plans, summary, trend_rows) ->
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "meta": meta, "summary": summary, "trend_rows": trend_rows,
         "articles": [{**a, "date": d(a["date"])} for a in articles],
-        "releases": [{"title": r["title"], "date": d(r["date"])} for r in releases],
+        "releases": [{"title": r["title"], "date": d(r["date"]), "deleted": r.get("deleted", False),
+                      "count": int(r.get("count") or 0)} for r in releases],
         "meetings": [list(m) for m in meetings], "plans": [list(p) for p in plans],
     }
     return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
@@ -230,7 +235,9 @@ def load_work(raw: bytes) -> dict:
             raise ValueError
         d = lambda x: date.fromisoformat(x) if x else None
         w["articles"] = [{**a, "date": d(a.get("date"))} for a in w["articles"]]
-        w["releases"] = [{"title": r["title"], "date": d(r.get("date"))} for r in w.get("releases", [])]
+        w["releases"] = [{"title": r["title"], "date": d(r.get("date")), "deleted": r.get("deleted", False),
+                          "count": int(r.get("count") or 0)}
+                         for r in w.get("releases", [])]
         w["meetings"] = [tuple(m) for m in w.get("meetings", [])]
         w["plans"] = [tuple(p) for p in w.get("plans", [])]
         w["meta"]["year"], w["meta"]["month"] = int(w["meta"]["year"]), int(w["meta"]["month"])

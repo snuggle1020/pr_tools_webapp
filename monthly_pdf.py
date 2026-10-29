@@ -243,6 +243,12 @@ def _change(label, prev, cur):
     return f"{label}는 {cur}건으로 {abs(cur - prev)}건 {'증가' if cur > prev else '감소'}했"
 
 
+def _deleted_note(data):
+    """게재 후 삭제한 보도자료 알림 한 문장 (없으면 빈 문자열)."""
+    gone = [f"‘{_clip(r['title'], 32)}’" for r in data["releases"] if r.get("deleted")]
+    return f"{', '.join(gone)} 보도자료는 게재 후 삭제 요청해 집계에서 제외했습니다." if gone else ""
+
+
 def _join(clauses):
     """'A했으며, B했습니다'처럼 한 문장으로 잇는다."""
     return "으며, ".join(clauses) + "습니다." if clauses else ""
@@ -260,7 +266,7 @@ def default_summary(data, release_dates=None):
     total = sum(t.values())
     prev_total = tr["release"][i] + tr["planned"][i] + tr["mention"][i]
     up, down = total > prev_total, total < prev_total
-    rels = data["releases"]
+    rels = [r for r in data["releases"] if not r.get("deleted")]
     parts = []
 
     # 보도자료: 배포 유무가 바뀌었는지, 전체 증감을 이끌었는지
@@ -282,6 +288,7 @@ def default_summary(data, release_dates=None):
             parts.append(f"{head}{how}" + (f"해 {lead}" if led else "했습니다."))
     else:
         parts.append(f"{m}월은 전월과 마찬가지로 보도자료 배포가 없었습니다.")
+    parts.append(_deleted_note(data))
 
     # 단순 언급: 비슷하면 '비슷한 수준', 크게 늘면 어떤 소식에서 거론됐는지
     p_men, c_men = tr["mention"][i], t.get("단순언급", 0)
@@ -311,7 +318,8 @@ def _summary_without_prev(data, release_dates=None):
     """전월 건수가 없을 때: ① 보도를 이끈 보도자료 ② 게재 매체 유형 ③ 단순 언급이 나온 주요 소식 ④ 기획 기사 유무."""
     m = data["month"]
     total = sum(data["types"].values())
-    rels, dates = data["releases"], list(release_dates or [])
+    dates = [d for d, r in zip(list(release_dates or []), data["releases"]) if not r.get("deleted")]
+    rels = [r for r in data["releases"] if not r.get("deleted")]
     parts = []
 
     # ① 보도를 이끈 것
@@ -333,6 +341,7 @@ def _summary_without_prev(data, release_dates=None):
                          f"그중 ‘{title}’이(가) {top['count']}건으로 가장 많이 실렸습니다.")
     else:
         parts.append(f"{m}월은 보도자료 배포 없이 총 {total}건이 보도됐습니다.")
+    parts.append(_deleted_note(data))
 
     # ② 게재 매체 유형
     cats = Counter(media_category(a["media"]) for a in data["articles"]).most_common()
@@ -355,7 +364,7 @@ def _summary_without_prev(data, release_dates=None):
     # ④ 기획 기사
     planned = sum(data["types"].get(k, 0) for k in PLANNED_TYPES)
     parts.append("기획·인터뷰 기사는 없었습니다." if not planned else f"기획·인터뷰 기사도 {planned}건 실렸습니다.")
-    return " ".join(parts)
+    return " ".join(x for x in parts if x)
 
 
 # ---------------------------------------------------------------- 그리기
@@ -415,7 +424,7 @@ def _draw_kpis(doc):
         diff = total - prev
         cells.append((f"{'+' if diff >= 0 else '−'}{abs(diff)}", "건", "전월 대비 증감",
                       GREEN if diff >= 0 else RED))
-    cells.append((str(len(d["releases"])), "건", "보도자료 배포 건수", INK))
+    cells.append((str(sum(1 for r in d["releases"] if not r.get("deleted"))), "건", "보도자료 배포 건수", INK))
     if tr:
         ytd = sum(tr["release"][i] + tr["planned"][i] + tr["mention"][i] for i in range(d["month"]))
         cells.append((str(ytd), "건", "연간 누적 건수", INK))
@@ -468,17 +477,19 @@ def _draw_releases(doc, dates):
         h = 16 + 17 * max(len(w) for w in wrapped) + 40
         for j, (r, lines) in enumerate(zip(pair, wrapped)):
             k = i + j
-            color = BLUE  # 보도자료 카드는 한 가지 색
+            deleted = r.get("deleted")
+            color = GRAY if deleted else BLUE  # 보도자료 카드는 한 가지 색, 게재 후 삭제한 건만 회색
             x = X0 + j * (cw + gap)
             p.rect(x, top, cw, h, fill=WHITE, stroke=LINE, r=8)
             p.rect(x, top, 4, h, fill=color)
             t = top + 16
             for line in lines:
-                p.text(x + 16, t, line, font=BOLD, size=11.5)
+                p.text(x + 16, t, line, font=BOLD, size=11.5, color=MUTED if deleted else INK)
                 t += 17
             dt = dates[k] if k < len(dates) else None
             if dt:
-                p.text(x + 16, top + h - 20, f"{dt.month}월 {dt.day}일 ({WEEKDAYS[dt.weekday()]}) 배포", size=9.3, color=MUTED)
+                p.text(x + 16, top + h - 20, f"{dt.month}월 {dt.day}일 ({WEEKDAYS[dt.weekday()]}) 배포"
+                       + (" 후 삭제 요청" if deleted else ""), size=9.3, color=MUTED)
             p.text(x + cw - 14, top + h - 21, "건", font=SEMI, size=10.5, color=MUTED, align="right")
             p.text(x + cw - 14 - _sw("건", SEMI, 10.5) - 3, top + h - 35, str(r["count"]), font=BOLD, size=25,
                    color=color, align="right")
