@@ -156,3 +156,31 @@ class RecordsStore:
                      "total": int(r["total"]), "media": sorted(r.get("media", []))} for r in records]
 
         self._update(company, fn, f"{company} 보도자료 기록 수정")
+
+    # ---------------------------------------------------------------- 월별 기록 (연간 PR리포트용)
+    # data["monthly"][고객사]["YYYY-MM"] = {"types": {형식: 건수}, "articles": [...], "releases": [...], "meetings": [[매체]]}
+    # 저장소가 공개라 기자 미팅은 매체명만 남김 (기자 이름·메모는 저장하지 않음)
+    def monthly_companies(self):
+        data, _ = self._read_raw()
+        return sorted(data.get("monthly", {}))
+
+    def monthly(self, company):
+        """{"YYYY-MM": 기록} (없으면 {})."""
+        data, _ = self._read_raw()
+        return dict(data.get("monthly", {}).get(company, {}))
+
+    def save_months(self, company, recs):
+        """recs: {"YYYY-MM": 기록} 을 저장 (같은 달은 덮어씀). 한 번에 커밋."""
+        if not recs:
+            return
+        self._ensure_branch()
+        for attempt in range(2):
+            data, sha = self._read_raw()
+            data.setdefault("monthly", {}).setdefault(company, {}).update(recs)
+            try:
+                self._write_raw(data, sha, f"{company} 월별 기록 저장: " + ", ".join(sorted(recs)))
+                return
+            except RecordsError as e:
+                if attempt == 0 and "409" in str(e):
+                    continue
+                raise

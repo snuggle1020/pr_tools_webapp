@@ -36,7 +36,7 @@ from monthly_report import (
     dump_work as dump_month_work, load_work as load_month_work,
 )
 from annual_report import (
-    PORTALS, TOPICS, add_saved_years, check_portal, compose_annual, default_highlights, default_summary, default_wrap, fetch_reporter,
+    PORTALS, TOPICS, add_saved_years, check_portal, compose_annual, month_to_record, record_from_monthly, default_highlights, default_summary, default_wrap, fetch_reporter,
     highlight_candidates, load_annual,
 )
 from annual_pdf import build_annual_pdf
@@ -88,6 +88,23 @@ def _records_store():
 
 
 RECORDS = _records_store()
+
+
+def _save_month_record(company, year, month, rec):
+    """월간 PDF를 받을 때 이 달 기록을 저장소에 저장 (연간 PR리포트가 파일 없이 씀)."""
+    try:
+        RECORDS.save_months(company, {f"{year}-{month:02d}": rec})
+        st.session_state["m_saved_msg"] = ("success", f"{company} {year}년 {month}월 기록을 저장했습니다. 연간 PR리포트에서 바로 쓸 수 있습니다.")
+    except RecordsError as e:
+        st.session_state["m_saved_msg"] = ("warning", f"PDF는 받았지만 연간 리포트용 기록을 저장하지 못했습니다: {e}")
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _stored_companies():
+    try:
+        return RECORDS.monthly_companies() if RECORDS else []
+    except RecordsError:
+        return []
 
 
 def _apply_media_map(rows, media_map):
@@ -890,8 +907,14 @@ with tab2:
         b1, b2, b3 = st.columns(3)
         if m_pdf:
             b1.download_button("📑 PDF 리포트 다운로드", data=m_pdf, file_name=f"{fname}.pdf", mime="application/pdf",
-                               type="primary", width="stretch", on_click="ignore", key="m_dl_pdf",
-                               help="다음 달에 이 PDF를 '지난달 PDF 리포트'에 올리면 월별 추이·전월 비교가 이어집니다.")
+                               type="primary", width="stretch", key="m_dl_pdf",
+                               on_click=_save_month_record if RECORDS else "ignore",
+                               args=(meta["company"], M["year"], M["month"], record_from_monthly(mdata)) if RECORDS else None,
+                               help="다음 달에 이 PDF를 '지난달 PDF 리포트'에 올리면 월별 추이·전월 비교가 이어집니다. "
+                                    "받을 때 이 달 기록이 앱에 저장되어 연간 PR리포트에 쓰입니다.")
+        m_saved = st.session_state.pop("m_saved_msg", None)
+        if m_saved:
+            getattr(st, m_saved[0])(m_saved[1])
         b2.download_button(
             "💾 작업 저장 (중간 저장용)",
             data=dump_month_work(meta, articles, releases, meetings, plans, summary_text, trend_input),
@@ -918,33 +941,59 @@ with tab2:
 # ------------------------------------------------------------------
 with tab_y:
     st.caption(
-        "월간 PR리포트 탭에서 만든 **월간 PDF**(1월~12월)를 한꺼번에 올리면 1년 치를 모아 연간 PDF를 만듭니다. "
-        "앱 이전에 엑셀로 만든 달이 있으면 그 해 **가장 최근 달 PR리포트 엑셀**도 함께 올리세요 (같은 달은 PDF가 우선). "
-        "지난 해 건수는 앱에 저장해 둔 기록(Secrets의 monthly_history)을 쓰고, 없으면 지난 해 12월 엑셀을 올리면 됩니다."
+        "월간 PR리포트 탭에서 PDF를 받을 때마다 그 달 기록이 앱에 저장됩니다. **고객사와 연도만 고르면** 저장된 기록으로 연간 PDF를 만듭니다. "
+        "앱 이전에 엑셀로 만든 달(올해 가장 최근 달 엑셀, 지난 해 12월 엑셀)이나 기록이 없는 달의 월간 PDF는 아래에서 올리고, "
+        "'기록으로 저장'을 한 번 누르면 다음부터는 파일 없이 됩니다."
     )
-    y_pdfs = st.file_uploader("올해 월간 PDF (이 앱에서 만든 월간 PR리포트, 여러 개)", type=["pdf"],
-                              accept_multiple_files=True, key="y_pdfs")
-    yc1, yc2 = st.columns(2)
-    y_cur = yc1.file_uploader("올해 PR리포트 엑셀 (엑셀로 만든 달이 있을 때 · 가장 최근 달 파일)", type=["xlsx"], key="y_cur")
-    y_prev = yc2.file_uploader("지난 해 PR리포트 엑셀 (저장된 기록이 없을 때 · 해마다 12월 파일)", type=["xlsx"],
-                               accept_multiple_files=True, key="y_prev")
-    y_has = bool(y_pdfs) or y_cur is not None
-    if y_has:
-        y_key = (tuple(f.file_id for f in y_pdfs or []), y_cur.file_id if y_cur else None,
-                 tuple(f.file_id for f in y_prev or []))
-        if st.session_state.get("y_key") != y_key:
-            st.session_state["y_key"] = y_key
-            try:
-                with st.spinner("파일 읽는 중..."):
+    companies = _stored_companies()
+    yk1, yk2, yk3 = st.columns([3, 1.2, 1.6], vertical_alignment="bottom")
+    if companies:
+        y_pick = yk1.selectbox("고객사 (저장된 기록)", companies, key="y_pick")
+    else:
+        y_pick = yk1.text_input("고객사", key="y_pick_text",
+                                help="아직 저장된 기록이 없습니다. 아래에서 파일을 올리고 '기록으로 저장'을 누르세요.")
+    y_year = yk2.number_input("연도", min_value=2000, max_value=2100, value=date.today().year, step=1, key="y_year")
+    y_go = yk3.button("📂 저장된 기록으로 만들기", type="primary", width="stretch", disabled=not (RECORDS and y_pick))
+    with st.expander("파일 올리기 (기록이 없는 달 채우기 · 처음 한 번)", expanded=not companies):
+        y_pdfs = st.file_uploader("월간 PDF (이 앱에서 만든 월간 PR리포트, 여러 개)", type=["pdf"],
+                                  accept_multiple_files=True, key="y_pdfs")
+        yc1, yc2 = st.columns(2)
+        y_cur = yc1.file_uploader("그 해 PR리포트 엑셀 (엑셀로 만든 달이 있을 때 · 가장 최근 달 파일)", type=["xlsx"], key="y_cur")
+        y_prev = yc2.file_uploader("지난 해 PR리포트 엑셀 (해마다 12월 파일, 여러 개)", type=["xlsx"],
+                                   accept_multiple_files=True, key="y_prev")
+    y_has = bool(y_pdfs) or y_cur is not None or bool(y_prev)
+    y_key = (("files", tuple(f.file_id for f in y_pdfs or []), y_cur.file_id if y_cur else None,
+              tuple(f.file_id for f in y_prev or [])) if y_has else None)
+    if y_go:
+        y_key = ("stored", y_pick, int(y_year), st.session_state.get("y_run", 0))
+    if y_key and st.session_state.get("y_key") != y_key:
+        st.session_state["y_key"] = y_key
+        try:
+            with st.spinner("기록 읽는 중..."):
+                stored = (lambda c: RECORDS.monthly(c)) if RECORDS else None
+                if y_key[0] == "stored":
+                    base_y = load_annual(stored=stored, company=y_pick, year=int(y_year))
+                else:
                     base_y = load_annual(y_cur.getvalue() if y_cur else None, [f.getvalue() for f in y_prev or []],
-                                         [f.getvalue() for f in y_pdfs or []])
-                    base_y["saved_years"] = add_saved_years(base_y, st.secrets)
-                    st.session_state["annual"] = base_y
-            except Exception as e:
-                st.session_state["annual"] = None
-                st.error(f"파일을 읽지 못했습니다: {e}")
-            st.session_state["y_run"] = st.session_state.get("y_run", 0) + 1
-    Y = st.session_state.get("annual") if y_has else None
+                                         [f.getvalue() for f in y_pdfs or []], stored=stored,
+                                         company=y_pick or None, year=int(y_year))
+                base_y["saved_years"] = add_saved_years(base_y, st.secrets)
+                st.session_state["annual"] = base_y
+        except Exception as e:
+            st.session_state["annual"] = None
+            st.error(f"연간 리포트를 만들 기록을 읽지 못했습니다: {e}")
+        st.session_state["y_run"] = st.session_state.get("y_run", 0) + 1
+    Y = st.session_state.get("annual")
+    if Y and RECORDS and Y.get("by_year"):
+        n_months = sum(len(v) for v in Y["by_year"].values())
+        if n_months and st.button(f"💾 올린 파일의 {n_months}개월을 '{Y['company']}' 기록으로 저장 (다음부터 파일 없이)", key="y_save_rec"):
+            try:
+                RECORDS.save_months(Y["company"], {f"{y}-{m:02d}": month_to_record(md)
+                                                   for y, ms in Y["by_year"].items() for m, md in ms.items()})
+                _stored_companies.clear()
+                st.success("저장했습니다. 다음부터는 고객사와 연도만 고르면 됩니다.")
+            except RecordsError as e:
+                st.error(f"저장하지 못했습니다: {e}")
     if Y:
         run = st.session_state["y_run"]
         partial = Y["last_month"] < 12
@@ -956,7 +1005,7 @@ with tab_y:
             st.warning(note)
         if not any(p["year"] == Y["year"] - 1 for p in Y["prev_years"]):
             st.info(f"{Y['year'] - 1}년 기록이 없어 전년 대비 수치와 월별 추이의 전년 점선은 빠집니다. "
-                    f"{Y['year'] - 1}년 12월 PR리포트 엑셀을 올리면 들어갑니다.")
+                    f"{Y['year'] - 1}년 12월 PR리포트 엑셀을 올리고 기록으로 저장하면 들어갑니다.")
         elif partial:
             st.caption(f"올해가 {Y['last_month']}월까지라 전년 대비는 {Y['year'] - 1}년 1~{Y['last_month']}월과 비교합니다.")
         y_company = st.text_input("PDF에 표시할 고객사명", value=Y["company"], key=f"y_company_{run}")

@@ -182,17 +182,53 @@ def read_month_pdf(raw: bytes):
     return h["company"], h["year"], h["month"], month, h["rows"]
 
 
-def load_annual(cur_raw=None, prev_raws=(), pdf_raws=()):
-    """앱에 올린 파일들 -> 앱 편집 전 기본 데이터.
-    cur_raw: 올해 PR리포트 엑셀(앱 전에 엑셀로 만든 달) / pdf_raws: 올해 월간 PDF들 (같은 달은 PDF가 우선)
-    prev_raws: 지난 해 12월 엑셀들. 반환에 'notes' (사용자에게 보여 줄 안내) 포함."""
+# ---------------------------------------------------------------- 월 데이터 <-> 기록 저장소 (records_store 의 월별 기록)
+
+def month_to_record(md):
+    """한 달 데이터 -> 저장용 JSON. 저장소가 공개라 기자 미팅은 매체명만 남김."""
+    d = lambda x: x.isoformat() if x else None
+    return {
+        "types": {k: int(v) for k, v in md["types"].items()},
+        "articles": [{"media": a["media"], "title": a["title"], "url": a.get("url") or "", "date": d(a["date"]),
+                      "kind": a["kind"]} for a in md["articles"]],
+        "releases": [{"title": r["title"], "count": int(r.get("count") or 0), "date": d(r.get("date"))}
+                     for r in md["releases"]],
+        "meetings": [[x[0].strip()] for x in md["meetings"] if (x[0] or "").strip()],
+    }
+
+
+def record_to_month(rec, m):
+    d = lambda x: date.fromisoformat(x) if x else None
+    return {
+        "month": m, "types": dict(rec.get("types", {})),
+        "articles": [dict(a, date=d(a.get("date"))) for a in rec.get("articles", [])],
+        "releases": [{"title": r["title"], "count": int(r.get("count") or 0), "date": d(r.get("date"))}
+                     for r in rec.get("releases", [])],
+        "meetings": [tuple((list(x) + ["", "", ""])[:3]) for x in rec.get("meetings", [])],
+    }
+
+
+def record_from_monthly(mdata):
+    """월간 탭 compose() 결과 -> 저장용 기록 (PDF에 숨기는 detail 과 같은 내용 + 형식별 건수)."""
+    det = mdata["history"]["detail"]
+    return {"types": {k: int(v) for k, v in mdata["types"].items()}, "articles": det["articles"],
+            "releases": det["releases"], "meetings": [[m[0]] for m in det["meetings"] if m and (m[0] or "").strip()]}
+
+
+def months_from_records(recs, year):
+    """{"YYYY-MM": 기록} 중 year 해 -> {월: 한 달 데이터}."""
+    return {int(k[5:7]): record_to_month(v, int(k[5:7])) for k, v in (recs or {}).items() if k.startswith(f"{year}-")}
+
+
+def read_files(cur_raw=None, pdf_raws=(), prev_raws=()):
+    """올린 파일들 -> {'company','year','months','rows_all','latest','notes','by_year': {연도: {월: 데이터}}}.
+    cur_raw: 그 해 PR리포트 엑셀 / pdf_raws: 그 해 월간 PDF (같은 달은 PDF가 우선) / prev_raws: 지난 해 12월 엑셀."""
     months, company, year, notes = {}, None, None, []
     if cur_raw:
         cur = read_year_excel(cur_raw)
         months.update(cur["months"])
         company, year = cur["company"], cur["year"]
-    rows_all = None  # 가장 늦은 달 PDF의 형식별 1~12월 건수 (기사 목록이 없는 달 건수 채우기용)
-    latest = 0
+    rows_all, latest = None, 0  # 가장 늦은 달 PDF의 형식별 1~12월 건수 (기사 목록이 없는 달 건수 채우기용)
     for raw in pdf_raws:
         c, y, m, month, rows = read_month_pdf(raw)
         if year is None:
@@ -206,22 +242,33 @@ def load_annual(cur_raw=None, prev_raws=(), pdf_raws=()):
             months[m] = month
         else:
             notes.append(f"{m}월 PDF에는 기사 목록이 없어(이전 버전으로 만든 PDF) 건수만 씁니다.")
-    if year is None:
-        raise ValueError("올해 월간 PDF나 PR리포트 엑셀을 올려 주세요.")
-    prev = []
+    by_year = {year: dict(months)} if year else {}
     for raw in prev_raws:
         y = read_year_excel(raw)
-        if y["year"] != year:
-            prev.append(y)
-    prev.sort(key=lambda y: y["year"])
+        company = company or y["company"]
+        by_year.setdefault(y["year"], {}).update(y["months"])
+    return {"company": company, "year": year, "months": months, "rows_all": rows_all, "latest": latest,
+            "notes": notes, "by_year": by_year}
+
+
+def prev_year_entry(y, months):
+    return {"year": y, "monthly": month_types(months), "releases": len(year_releases(months))}
+
+
+def build_base(company, year, months, prev_years=(), rows_all=None, latest=0, notes=()):
+    """한 해 월 데이터 -> 앱 편집 전 기본 데이터."""
+    notes = list(notes)
     monthly = month_types(months)
     if rows_all:  # 기사 목록은 없지만 PDF 기록에 건수가 있는 달
         for i in range(latest):
             if i + 1 not in months:
                 for k, _, names in TYPES5:
                     monthly[k][i] = sum(rows_all.get(n, [0] * 12)[i] for n in names)
-    last = max([latest] + list(months))
-    missing = [m for m in range(1, last + 1) if m not in months]
+    last = max([latest] + list(months)) if (months or latest) else 0
+    # 기록이 시작된 달 이후 빈 달, 또는 건수는 있는데 기사 목록이 없는 달만 알림 (홍보 시작 전 달은 빼고)
+    first = min(months) if months else last
+    missing = [m for m in range(1, last + 1) if m not in months
+               and (m > first or any(monthly[k][m - 1] for k, _, _ in TYPES5))]
     if missing:
         notes.append("기사 목록이 없는 달: " + ", ".join(f"{m}월" for m in missing)
                      + " (월별 건수에는 들어가지만 매체·보도자료·하이라이트 집계에서는 빠집니다)")
@@ -236,14 +283,46 @@ def load_annual(cur_raw=None, prev_raws=(), pdf_raws=()):
                 continue
             articles.append({"media": canon_media(a["media"]), "title": a["title"], "url": a["url"],
                              "date": a["date"], "kind": k, "portal": None, "reporter": None})
-    meetings = [{"month": m, "media": canon_media(x[0]), "reporter": x[1].strip(), "memo": x[2].strip()}
+    meetings = [{"month": m, "media": canon_media(x[0]), "reporter": (x[1] or "").strip(), "memo": (x[2] or "").strip()}
                 for m in sorted(months) for x in months[m]["meetings"] if (x[0] or "").strip()]
     return {
         "company": company, "year": year, "last_month": last,
         "monthly": monthly, "releases": releases, "articles": articles, "meetings": meetings, "notes": notes,
-        "prev_years": [{"year": y["year"], "monthly": month_types(y["months"]),
-                        "releases": len(year_releases(y["months"]))} for y in prev],
+        "prev_years": sorted(prev_years, key=lambda p: p["year"]),
     }
+
+
+def load_annual(cur_raw=None, prev_raws=(), pdf_raws=(), stored=None, company=None, year=None):
+    """올린 파일 + 저장된 월별 기록(stored: {"YYYY-MM": 기록}) -> 기본 데이터.
+    파일이 없으면 company·year 로 저장된 기록만 씀. 같은 달은 올린 파일이 우선.
+    반환에 'by_year' (올린 파일의 연도별 월 데이터, 기록으로 저장할 때 씀) 포함."""
+    f = read_files(cur_raw, pdf_raws, prev_raws) if (cur_raw or pdf_raws or prev_raws) else None
+    if f and f["year"]:
+        company, year = f["company"], f["year"]
+    if not company or not year:
+        raise ValueError("올해 월간 PDF나 PR리포트 엑셀을 올리거나, 저장된 기록의 고객사·연도를 고르세요.")
+    if callable(stored):  # 고객사를 파일에서 알게 된 뒤에 그 고객사 기록을 불러옴
+        stored = stored(company)
+    months = months_from_records(stored, year)
+    if f and f["year"]:
+        months.update(f["months"])
+    if not months and not (f and f["rows_all"]):
+        raise ValueError(f"{company} {year}년 기록이 없습니다. 월간 PDF나 PR리포트 엑셀을 올려 주세요.")
+    by_year = (f or {}).get("by_year", {})
+    prev = {}
+    for k in (stored or {}):
+        y = int(k[:4])
+        if y < year:
+            prev[y] = prev_year_entry(y, months_from_records(stored, y))
+    for y, ms in by_year.items():
+        if y != year:
+            merged = months_from_records(stored, y)
+            merged.update(ms)
+            prev[y] = prev_year_entry(y, merged)
+    base = build_base(company, year, months, list(prev.values()),
+                      f["rows_all"] if f else None, f["latest"] if f else 0, f["notes"] if f else ())
+    base["by_year"] = by_year
+    return base
 
 
 # ---------------------------------------------------------------- 포털 · 기자명 확인 (엑셀에 없음)
