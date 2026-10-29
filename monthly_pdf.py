@@ -231,9 +231,84 @@ def _topic_label(title):
     return f"‘{_clip(t, 20)}’"
 
 
+def _change(label, prev, cur):
+    """형식별 증감을 보고서 말투로 (문장 끝 '습니다'는 빼고 줘서 '~했으며,'로 이어 붙일 수 있게).
+    예) 인터뷰 기사 1건이 새롭게 게재됐 / 기획 기사는 1건으로 전월 수준을 유지했 / 기고는 3건으로 2건 증가했"""
+    if not prev:
+        return f"{label} {cur}건이 새롭게 게재됐"
+    if not cur:
+        return f"{label}는 이번 달 게재되지 않았"
+    if prev == cur:
+        return f"{label}는 {cur}건으로 전월 수준을 유지했"
+    return f"{label}는 {cur}건으로 {abs(cur - prev)}건 {'증가' if cur > prev else '감소'}했"
+
+
+def _join(clauses):
+    """'A했으며, B했습니다'처럼 한 문장으로 잇는다."""
+    return "으며, ".join(clauses) + "습니다." if clauses else ""
+
+
 def default_summary(data, release_dates=None):
     """이달의 요약 기본 문장 (규칙으로 만든 초안, 앱에서 담당자가 고쳐 씀).
-    ① 보도를 이끈 보도자료 ② 게재 매체 유형 ③ 단순 언급이 나온 주요 소식 ④ 전월 대비·기획 기사 유무."""
+    전월 건수가 있으면 형식별로 전월과 비교: 보도자료 배포 → 단순 언급 → 기획·인터뷰·기고.
+    전월 건수가 없으면(1월이거나 기록 없음) 이달 내용만 정리한다."""
+    m, t = data["month"], data["types"]
+    tr = data["trend"]
+    if not (tr and m > 1):
+        return _summary_without_prev(data, release_dates)
+    i = m - 2
+    total = sum(t.values())
+    prev_total = tr["release"][i] + tr["planned"][i] + tr["mention"][i]
+    up, down = total > prev_total, total < prev_total
+    rels = data["releases"]
+    parts = []
+
+    # 보도자료: 배포 유무가 바뀌었는지, 전체 증감을 이끌었는지
+    p_rel, c_rel = tr["release"][i], t.get("보도자료", 0)
+    led = (c_rel > p_rel and up) or (c_rel < p_rel and down)
+    lead = f"전체 게재 수 {'증가' if up else '감소'}를 이끌었습니다."
+    if p_rel == 0 and rels:
+        parts.append(f"전월에는 보도자료 배포가 없었으나, {m}월 보도자료 {len(rels)}건을 배포해 관련 기사 {c_rel}건이 " +
+                     (f"게재되며 {lead}" if led else "게재됐습니다."))
+    elif p_rel and not rels:
+        parts.append(f"{m}월은 보도자료 배포가 없어 관련 기사가 {p_rel}건에서 0건으로 " +
+                     (f"줄며 {lead}" if led else "감소했습니다."))
+    elif rels:
+        head = f"{m}월은 보도자료 {len(rels)}건을 배포해 관련 기사 {c_rel}건이 게재되며, "
+        if p_rel == c_rel:
+            parts.append(f"{head}전월 수준을 유지했습니다.")
+        else:
+            how = f"전월 대비 {abs(c_rel - p_rel)}건 {'증가' if c_rel > p_rel else '감소'}"
+            parts.append(f"{head}{how}" + (f"해 {lead}" if led else "했습니다."))
+    else:
+        parts.append(f"{m}월은 전월과 마찬가지로 보도자료 배포가 없었습니다.")
+
+    # 단순 언급: 비슷하면 '비슷한 수준', 크게 늘면 어떤 소식에서 거론됐는지
+    p_men, c_men = tr["mention"][i], t.get("단순언급", 0)
+    big = [mn for mn in data["mentions"] if mn["count"] >= 2][:2]
+    topics = ", ".join(f"{_topic_label(mn['title'])}({mn['count']}건)" for mn in big)
+    if p_men == c_men:
+        if c_men:
+            parts.append(f"단순 언급은 {c_men}건으로 전월 수준을 유지했습니다.")
+    elif not c_men:
+        parts.append("단순 언급 기사는 이번 달 게재되지 않았습니다.")
+    elif abs(c_men - p_men) <= max(2, p_men * 0.2):
+        parts.append(f"단순 언급은 {c_men}건으로 전월과 비슷한 수준입니다.")
+    elif c_men > p_men and topics:
+        parts.append(f"단순 언급은 {topics} 소식에서 거론되며 {c_men}건으로 {c_men - p_men}건 증가했습니다.")
+    else:
+        parts.append(_join([_change("단순 언급", p_men, c_men).replace("단순 언급는", "단순 언급은")]))
+
+    # 기획 · 인터뷰 · 기고: 이번 달이나 전월에 있었던 것만, 한 문장으로
+    parts.append(_join([_change(label, tr[key][i], now) for label, key, now in [
+        ("기획 기사", "plan", t.get("기획(오픈피알)", 0) + t.get("기획(외부)", 0)),
+        ("인터뷰 기사", "interview", t.get("인터뷰", 0)),
+        ("기고", "contrib", t.get("기고", 0))] if tr[key][i] or now]))
+    return " ".join(x for x in parts if x)
+
+
+def _summary_without_prev(data, release_dates=None):
+    """전월 건수가 없을 때: ① 보도를 이끈 보도자료 ② 게재 매체 유형 ③ 단순 언급이 나온 주요 소식 ④ 기획 기사 유무."""
     m = data["month"]
     total = sum(data["types"].values())
     rels, dates = data["releases"], list(release_dates or [])
@@ -277,18 +352,9 @@ def default_summary(data, release_dates=None):
     elif data["mentions"]:
         parts.append(f"단순 언급은 {data['types'].get('단순언급', 0)}건으로, 여러 소식에서 개별적으로 거론됐습니다.")
 
-    # ④ 전월 대비 · 기획 기사
+    # ④ 기획 기사
     planned = sum(data["types"].get(k, 0) for k in PLANNED_TYPES)
-    plan_txt = "기획·인터뷰 기사는 없었습니다" if not planned else f"기획·인터뷰 기사도 {planned}건 실렸습니다"
-    tr = data["trend"]
-    if tr and m > 1:
-        i = m - 2
-        prev = tr["release"][i] + tr["planned"][i] + tr["mention"][i]
-        diff = total - prev
-        change = f"{abs(diff)}건 늘었" if diff > 0 else f"{abs(diff)}건 줄었" if diff < 0 else "같은 수준이었"
-        parts.append(f"전월({prev}건) 대비 {change}으며, {plan_txt}.")
-    else:
-        parts.append(f"{plan_txt}.")
+    parts.append("기획·인터뷰 기사는 없었습니다." if not planned else f"기획·인터뷰 기사도 {planned}건 실렸습니다.")
     return " ".join(parts)
 
 
