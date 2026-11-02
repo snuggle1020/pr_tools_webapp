@@ -30,7 +30,9 @@ from article_meta import complete_truncated_titles, fetch_article_meta, normaliz
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
-from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf, default_summary, read_history
+# 같은 이름 함수가 결과보고서(report_history)·연간(annual_report)에도 있어서 월간 것은 별칭으로 가져옴
+from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf
+from monthly_pdf import default_summary as monthly_summary, read_history as read_pdf_history
 from monthly_report import (
     KIND_OPTIONS, auto_group_mentions, auto_mark_releases, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
@@ -666,7 +668,7 @@ with tab2:
             st.session_state["m_prev_applied"] = prev_key
             raw = m_prev.getvalue()
             if m_prev.name.lower().endswith(".pdf"):
-                h = read_history(raw)
+                h = read_pdf_history(raw)
                 year, rows = (h["year"], h["rows"]) if h else (None, None)
                 if not h:
                     msg = ("warning", "이 PDF에는 월별 기록이 없습니다 (이 앱으로 만든 PDF가 아님). "
@@ -842,7 +844,7 @@ with tab2:
         # ⑤ 요약
         st.markdown("##### ⑥ 이달의 요약")
         s_key, auto_key = f"m_summary_{run}", f"m_summary_auto_{run}"
-        auto_text = default_summary(mdata, rel_dates)
+        auto_text = monthly_summary(mdata, rel_dates)
         # 아직 손대지 않았으면(자동 문장 그대로면) 표를 고칠 때마다 자동 문장도 새로 맞춤. 직접 고친 뒤에는 건드리지 않음
         if s_key not in st.session_state:
             st.session_state[s_key] = M["summary"] if M["summary"] is not None else auto_text
