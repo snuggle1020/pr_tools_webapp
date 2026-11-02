@@ -563,7 +563,9 @@ def _draw_types_and_trend(doc):
         for _, name, color in TREND_SERIES:
             p.rect(lx, box + h - 17, 7, 7, fill=color, r=1.5)
             lx = p.text(lx + 10, box + h - 18.5, name, size=8.3, color=MUTED) + 9
-    doc.top = box + h
+    # 02 상자 아래 오른쪽에 기획(오픈피알) 뜻 한 줄
+    p.text(X0 + cw - 2, box + h + 6, "※ 기획(오픈피알) - 오픈피알 피칭·컨택 후 작성된 기획 기사", size=7.8, color=MUTED, align="right")
+    doc.top = box + h + 16
 
 
 def _table(doc, cols, rows, x=X0, w=W, font_size=9, lead=13):
