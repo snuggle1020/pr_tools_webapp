@@ -785,6 +785,9 @@ with tab2:
                 "group": text("묶음", ""), "media": text("매체", a["media"]), "title": text("제목", a["title"]),
                 "date": d if isinstance(d, date) and not pd.isna(d) else a["date"],
             })
+        # 예전에 수집했거나 작업 파일로 불러온 기사는 제목이 '...'로 잘려 있을 수 있음 -> 고친 내용은 두고 제목만 원문에서 채움
+        n_cut = sum(1 for a in articles if a["title"].rstrip().endswith(("...", "…")))
+        fix_go = n_cut and st.button(f"✂ 잘린 제목 {n_cut}건 원문에서 전체 제목으로 바꾸기", key=f"m_fix_titles_{run}")
 
         # ②-1 네이버에 없는 기사 (접지 않고 항상 보이게)
         st.markdown("##### ②-1 네이버에 없는 기사 추가")
@@ -868,6 +871,20 @@ with tab2:
             st.rerun()
         summary_text = st.text_area(
             "PDF 1쪽에 들어갑니다 · 표 내용으로 자동으로 쓴 초안이니 자유롭게 고치세요 (비우면 빠짐)", height=130, key=s_key)
+
+        if fix_go:  # 지금까지 고친 내용(형식·묶음·보도자료·미팅·목표·요약)은 그대로 두고 제목만 바꿔서 다시 그림
+            cut = [{"제목": a["title"], "URL": a["url"], "_a": a} for a in articles
+                   if a["title"].rstrip().endswith(("...", "…"))]
+            with st.spinner(f"잘린 제목 {len(cut)}건을 원문에서 확인 중..."):
+                dmap = load_domain_map()
+                with ThreadPoolExecutor(max_workers=6) as pool:
+                    list(pool.map(lambda r: complete_truncated_titles([r], dmap), cut))
+            for r in cut:
+                r["_a"]["title"] = r["제목"]
+            M.update(articles=articles, releases=releases, meetings=meetings, plans=plans,
+                     summary=summary_text, company=meta["company"], trend_rows=trend_input)
+            st.session_state["m_run"] = run + 1
+            st.rerun()
 
         if add_go:  # 지금까지 고친 내용을 저장한 뒤 기사를 붙이고 표를 다시 그림
             urls = [u.rstrip(".,)") for u in re.findall(r"https?://[^\s<>\"']+", add_text or "")]
