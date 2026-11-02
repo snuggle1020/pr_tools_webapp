@@ -26,7 +26,7 @@ from report_sheet import (
 from report_pdf import auto_topic, build_pdf
 from report_history import build_comparison, read_history
 from records_store import RecordsError, RecordsStore
-from article_meta import complete_truncated_titles, fetch_article_meta, normalize_url
+from article_meta import complete_truncated_titles, fetch_article_meta, load_domain_map, normalize_url
 from work_file import dump_work, load_work, restore_choices
 from pr_report_core import fetch_month_articles, classify_row, clean_html
 from daily_collect_sheet import build_daily_sheet
@@ -625,11 +625,22 @@ with tab2:
                     st.error(f"뉴스 수집 실패: {e}")
                     items = None
             if items is not None:
+                # 네이버 검색 API는 긴 제목을 '...'로 잘라 줌 -> 기사 원문에서 전체 제목을 읽어 바꿈 (형식 판단 전에)
+                titles = {id(it): clean_html(it["title"]) for it in items}
+                cut = [{"제목": titles[id(it)], "URL": it.get("originallink") or it.get("link"), "_id": id(it)}
+                       for it in items if titles[id(it)].rstrip().endswith(("...", "…"))]
+                if cut:
+                    with st.spinner(f"네이버에서 잘려서 온 기사 제목 {len(cut)}건을 원문에서 확인 중..."):
+                        dmap = load_domain_map()
+                        with ThreadPoolExecutor(max_workers=6) as pool:
+                            list(pool.map(lambda r: complete_truncated_titles([r], dmap), cut))
+                    for r in cut:
+                        titles[r["_id"]] = r["제목"]
                 auto = {}
                 if m_auto and items:
                     bar = st.progress(0.0, text="보도자료 자동 분류 중...")
                     with ThreadPoolExecutor(max_workers=6) as pool:
-                        futs = {pool.submit(classify_row, clean_html(it["title"]), it.get("originallink") or it.get("link"),
+                        futs = {pool.submit(classify_row, titles[id(it)], it.get("originallink") or it.get("link"),
                                             m_keyword): it for it in items}
                         for n, fut in enumerate(as_completed(futs), 1):
                             it = futs[fut]
@@ -641,7 +652,7 @@ with tab2:
                     bar.empty()
                 arts = []
                 for it in items:
-                    t = clean_html(it["title"])
+                    t = titles[id(it)]
                     arts.append({
                         "url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": t,
                         "date": it["_dt"].date(), "kind": initial_kind(t, m_keyword, auto.get(id(it))),
