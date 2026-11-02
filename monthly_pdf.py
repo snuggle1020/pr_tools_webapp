@@ -653,8 +653,8 @@ def _draw_articles(doc, dates):
     rows = []
     for no, a in enumerate(arts, 1):
         dt = f"{a['date'].month}.{a['date'].day}" if a["date"] else ""
-        rows.append({"cells": [(no, REG, MUTED), (a["media"], SEMI, INK), (a["title"], REG, INK),
-                               (dt, REG, MUTED), (("기획" if a["kind"] in ("기획(오픈피알)", "기획(외부)") else a["kind"]) or "-", MED, MUTED)],
+        rows.append({"cells": [(no, REG, MUTED), (a["media"], REG, INK), (a["title"], REG, INK),
+                               (dt, REG, MUTED), (("기획" if a["kind"] in ("기획(오픈피알)", "기획(외부)") else a["kind"]) or "-", REG, MUTED)],
                      "link": (2, a["url"])})
     if not arts:
         doc.p.text(X0, doc.top, "정리된 기사가 없습니다.", size=9.5, color=MUTED)
@@ -675,7 +675,7 @@ def _draw_mentions(doc):
         doc.p.text(X0, doc.top, "이번 달 단순 언급 기사가 없습니다.", size=9.5, color=MUTED)
         doc.top += 16
         return
-    rows = [{"cells": [(i, REG, MUTED), (m["title"], REG, INK), (m["media"], REG, INK), (f"{m['count']}건", MED, INK)],
+    rows = [{"cells": [(i, REG, MUTED), (m["title"], REG, INK), (m["media"], REG, INK), (f"{m['count']}건", REG, INK)],
              "link": (1, m["url"])} for i, m in enumerate(ms, 1)]
     _table(doc, [("No", 28, "center"), ("제목", None, "left"), ("대표 매체", 84, "left"),
                  ("관련 기사", 54, "center")], rows)  # 위 기사 표와 같은 글자 크기·칸 너비
