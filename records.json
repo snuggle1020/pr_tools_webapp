@@ -1090,5 +1090,246 @@
  },
  "media_map": {
   "pinpointnews.co.kr": "핀뉴스"
+ },
+ "monthly": {
+  "딥파인": {
+   "2026-10": {
+    "types": {
+     "인터뷰": 0,
+     "기고": 0,
+     "기획(오픈피알)": 0,
+     "기획(외부)": 4,
+     "보도자료": 26,
+     "단순언급": 24
+    },
+    "articles": [
+     {
+      "media": "가스신문",
+      "title": "[기획] 사고조사 전문성 기대되는 스마트 장비, 그 효과는 가스사고 현...",
+      "url": "https://www.gasnews.com/news/articleView.html?idxno=127017",
+      "date": "2026-10-02",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "전자신문",
+      "title": "[KES2026]가전 넘어 작업 현장으로…中企, AI·로봇 솔루션 전시",
+      "url": "https://www.etnews.com/20261013000262",
+      "date": "2026-10-13",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "산업일보",
+      "title": "딥파인, 스마트 글라스로 물류·산업 현장 업무 디지털화",
+      "url": "https://kidd.co.kr/news/247706",
+      "date": "2026-10-13",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "정보통신신문",
+      "title": "일상 넘어 산업까지 AI로 생산성 혁신",
+      "url": "https://www.koit.co.kr/news/articleView.html?idxno=209471",
+      "date": "2026-10-13",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "동아일보",
+      "title": "위례선 트램에 ‘0.5초’ 위험 감지 AI 실증한다",
+      "url": "https://www.donga.com/news/It/article/all/20261020/134872628/2",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "머니투데이",
+      "title": "12월 운행 앞둔 위례 트램…'공간 AI'로 선로 위험 막는다",
+      "url": "https://www.mt.co.kr/future/2026/10/20/2026102009213153689",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "지디넷코리아",
+      "title": "딥파인, 트램 사고 위험 AI로 미리 본다…위례선 실증",
+      "url": "https://zdnet.co.kr/view/?no=20261020104140",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "디지털데일리",
+      "title": "\"트램 선로 위험 0.5초 내 감지\"…딥파인, 위례선 실증 돌입",
+      "url": "https://www.ddaily.co.kr/page/view/2026102008541125693",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "아이티데일리",
+      "title": "[AI 브리프] 플리토, 3분기 누적 영업이익 103억…창사 이래 최대",
+      "url": "https://www.itdaily.kr/news/articleView.html?idxno=242321",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "데이터넷",
+      "title": "딥파인·서울교통공사, AI 기반 트램 안전 운영 플랫폼 개발 맞손",
+      "url": "https://www.datanet.co.kr/news/articleView.html?idxno=215203",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "AI타임스",
+      "title": "[게시판] NC AI, 바르코 3D·사운드 50% 할인 프로모션 등 단신",
+      "url": "https://www.aitimes.com/news/articleView.html?idxno=216455",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "테크월드",
+      "title": "딥파인-서울교통공사, AI로 트램 사고 위험 사전 감지…위례선서 실증",
+      "url": "https://www.epnc.co.kr/news/articleView.html?idxno=408445",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "바이라인네트워크",
+      "title": "딥파인, AI로 트램 사고 위험 사전 감지한다",
+      "url": "https://byline.network/?p=9004111222623914",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "벤처스퀘어",
+      "title": "딥파인, 서울교통공사와 트램 사고 예방 AI 개발…위례선서 현장 실증",
+      "url": "https://www.venturesquare.net/1121264/",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "플래텀",
+      "title": "트램 선로에 다가오는 보행자, AI가 먼저 본다… 딥파인·서울교통공사...",
+      "url": "https://platum.kr/archives/296604",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "테크42",
+      "title": "[스타트업 안테나] 엔젤스윙 해외 계약·딥파인 트램 AI 개발…로봇·보안·물류 기술 사업화 확대",
+      "url": "https://www.tech42.co.kr/%EC%8A%A4%ED%83%80%ED%8A%B8%EC%97%85-%EC%95%88%ED%85%8C%EB%82%98-%EC%97%94%EC%A0%A4%EC%8A%A4%EC%9C%99-%ED%95%B4%EC%99%B8-%EA%B3%84%EC%95%BD%C2%B7%EB%94%A5%ED%8C%8C%EC%9D%B8-%ED%8A%B8%EB%9E%A8-ai/",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "헬로티",
+      "title": "딥파인-서울교통공사, AI로 트램 선로 위험 사전 감지하는 안전 플랫폼...",
+      "url": "https://www.hellot.net/news/article.html?no=115638",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "디일렉",
+      "title": "딥파인, 서울교통공사와 AI 기반 트램 안전 운영 플랫폼 개발",
+      "url": "https://www.thelec.kr/news/articleView.html?idxno=63989",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "에이빙뉴스",
+      "title": "보행자·차량 뒤섞인 트램 길목, AI가 먼저 본다… 딥파인, 서울교통공...",
+      "url": "https://kr.aving.net/news/articleView.html?idxno=1815788",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "브릿지경제",
+      "title": "[IT 소식] 모픽, ‘MCP’ 출시⋯클로드·코덱스서 AI 영상 제작 지원 外",
+      "url": "https://www.viva100.com/article/20261020500160",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "한스경제",
+      "title": "딥파인·서울교통공사, 트램 사고 예방 AI 플랫폼 공동 개발",
+      "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=874585",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "디지털경제뉴스",
+      "title": "딥파인-서울교통공사, 노면전차 안전 운영 AI 플랫폼 개발 나서",
+      "url": "https://www.denews.co.kr/news/articleView.html?idxno=42784",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "퍼블릭타임스",
+      "title": "딥파인·서울교통공사,노면전차 안전 운영 AI 플랫폼 개발...트램 사고 ...",
+      "url": "https://www.public25.com/news/articleView.html?idxno=56792",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "내외경제TV",
+      "title": "[UP! START] 딥파인, 위례선 안전 운영 AI 플랫폼 개발",
+      "url": "https://www.nbntv.co.kr/news/articleView.html?idxno=4026308",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "뉴스웍스",
+      "title": "[IT 라운지] 영림원-KB국민은행 '제휴'·딥파인 '트램 안전 AI 플랫폼' 개...",
+      "url": "https://www.newsworks.co.kr/news/articleView.html?idxno=900047",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "벤처타임즈",
+      "title": "딥파인, 서울교통공사와 노면전차 안전 운영 플랫폼 개발",
+      "url": "https://www.vtimes.kr/news/articleView.html?idxno=56237",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "와우테일",
+      "title": "딥파인, AX혁신기업창의기술개발사업 선정…트램 안전 플랫폼 개발",
+      "url": "https://wowtale.net/2026/10/20/266552/",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "이지경제",
+      "title": "딥파인, 서울교통공사와 트램 사고 예방 AI 개발",
+      "url": "https://www.ezyeconomy.com/news/articleView.html?idxno=241030",
+      "date": "2026-10-21",
+      "kind": "보도자료"
+     },
+     {
+      "media": "스타트업레시피",
+      "title": "[DailyRecipe] 9.3:1 뚫고…2차 모두의창업 출발선에 선 1만명",
+      "url": "https://startuprecipe.co.kr/archives/invest-newsletter/5838023",
+      "date": "2026-10-21",
+      "kind": "보도자료"
+     },
+     {
+      "media": "월간인물",
+      "title": "AI로 트램 사고 위험 사전 감지…딥파인, 서울교통공사와 노면전차 안전 운영 플랫폼 개발",
+      "url": "https://www.monthlypeople.com/news/articleView.html?idxno=702131",
+      "date": "2026-10-21",
+      "kind": "보도자료"
+     }
+    ],
+    "releases": [
+     {
+      "title": "딥파인, 서울교통공사와 노면전차 안전 운영 플랫폼 개발",
+      "date": "2026-10-20",
+      "count": 26
+     }
+    ],
+    "meetings": [
+     [
+      "동아닷컴"
+     ],
+     [
+      "지디넷코리아"
+     ]
+    ]
+   }
+  }
  }
 }
