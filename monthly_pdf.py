@@ -617,7 +617,7 @@ def _draw_meetings_and_plans(doc):
     doc.section(4, "기자 미팅", x=X0, w=cw)
     doc.top = start + 26
     if d["meetings"]:
-        rows = [{"cells": [(a, SEMI, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["meetings"]]
+        rows = [{"cells": [(a, REG, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["meetings"]]
         _table(doc, [("매체", 82, "left"), ("기자", 50, "left"), ("주요 내용", None, "left")], rows, x=X0, w=cw)
     else:
         doc.p.text(X0, doc.top, "이번 달 정리할 미팅이 없습니다.", size=9.5, color=MUTED)
@@ -635,7 +635,7 @@ def _draw_meetings_and_plans(doc):
     doc.section(5, d["plan_title"], x=x, w=w)
     doc.top = start2 + 26
     if d["plans"]:
-        rows = [{"cells": [(a, SEMI, INK), (b, SEMI, INK), (c, REG, INK)]} for a, b, c in d["plans"]]
+        rows = [{"cells": [(a, REG, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["plans"]]
         _table(doc, [("형식", 54, "left"), ("내용", None, "left"), ("진행 상황", 86, "left")], rows, x=x, w=w)
     else:
         doc.p.text(x, doc.top, "등록된 목표가 없습니다.", size=9.5, color=MUTED)
@@ -652,7 +652,7 @@ def _draw_articles(doc, dates):
     for no, a in enumerate(arts, 1):
         dt = f"{a['date'].month}.{a['date'].day}" if a["date"] else ""
         rows.append({"cells": [(no, REG, MUTED), (a["media"], SEMI, INK), (a["title"], REG, INK),
-                               (dt, REG, MUTED), (a["kind"] or "-", MED, MUTED)],
+                               (dt, REG, MUTED), (("기획" if a["kind"] in ("기획(오픈피알)", "기획(외부)") else a["kind"]) or "-", MED, MUTED)],
                      "link": (2, a["url"])})
     if not arts:
         doc.p.text(X0, doc.top, "정리된 기사가 없습니다.", size=9.5, color=MUTED)
