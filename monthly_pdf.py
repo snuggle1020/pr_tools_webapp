@@ -509,7 +509,7 @@ def _draw_types_and_media(doc):
     h = 170
     doc.ensure(26 + h)
     top = doc.top
-    doc.section(2, "기사 형식별 보도 수", x=X0, w=cw)
+    doc.section(3, "기사 형식별 보도 수", x=X0, w=cw)
     box = top + 26
     # 형식별 막대
     p.rect(X0, box, cw, h, fill=WHITE, stroke=LINE, r=8)
@@ -530,9 +530,9 @@ def _draw_types_and_media(doc):
     p.text(X0 + 14, t + 11, "합계", font=BOLD, size=10)
     p.text(X0 + cw - 14, t + 11, f"{sum(types.values())}건", font=BOLD, size=10, align="right")
 
-    # 03 매체 유형별 보도 수 (이번 달 실린 기사 전체, 단순언급 포함)
+    # 04 매체 유형별 보도 수 (이번 달 실린 기사 전체, 단순언급 포함)
     x0 = X0 + cw + gap
-    doc.section(3, "매체 유형별 보도 수", x=x0, w=cw)
+    doc.section(4, "매체 유형별 보도 수", x=x0, w=cw)
     p.rect(x0, box, cw, h, fill=WHITE, stroke=LINE, r=8)
     cats = d.get("media_types") or []
     if not cats:
@@ -546,12 +546,12 @@ def _draw_types_and_media(doc):
         p.rect(bx, t + 2.5, max(7, bw * n / mx), 7, fill=BLUE if n == mx else GRAY, r=3.5)
         p.text(x0 + cw - 14, t, f"{n}건", font=BOLD, size=9.5, align="right")
         t += 20
-    if cats:  # 02 와 같은 합계 줄 (02 합계와 같은 높이에)
+    if cats:  # 03 과 같은 합계 줄 (03 합계와 같은 높이에)
         t = box + 14 + 20 * len(TYPE_ORDER)
         p.hline(x0 + 14, t + 2, cw - 28)
         p.text(x0 + 14, t + 11, "합계", font=BOLD, size=10)
         p.text(x0 + cw - 14, t + 11, f"{sum(n for _, n in cats)}건", font=BOLD, size=10, align="right")
-    # 02 상자 아래 오른쪽에 기획(오픈피알) 뜻 한 줄
+    # 03 상자 아래 오른쪽에 기획(오픈피알) 뜻 한 줄
     p.text(X0 + cw - 2, box + h + 6, "※ 기획(오픈피알) - 오픈피알 피칭·컨택 후 작성된 기획 기사", size=7.8, color=MUTED, align="right")
     doc.top = box + h + 16
 
@@ -560,7 +560,7 @@ SOFT_BLUE = HexColor("#F2F5FD")
 
 
 def _draw_trend(doc):
-    """04 월별 보도 추이: 1~12월 쌓은 막대 + 같은 세로줄의 형식별 건수 표 (이번 달 세로 띠)."""
+    """02 월별 보도 추이: 1~12월 쌓은 막대 + 같은 세로줄의 형식별 건수 표 (이번 달 세로 띠)."""
     p, d = doc.p, doc.data
     tr, m = d["trend"], d["month"]
     if not tr:
@@ -571,7 +571,7 @@ def _draw_trend(doc):
     doc.top += 22
     doc.ensure(26 + box_h)
     top = doc.top
-    doc.section(4, "월별 보도 추이")
+    doc.section(2, "월별 보도 추이")
     bt = top + 26
     p.rect(X0, bt, W, box_h, fill=WHITE, stroke=LINE, r=8)
     ix, iw = X0 + 12, W - 24
@@ -768,8 +768,8 @@ def build_monthly_pdf(data, release_dates, summary_text=""):
     _draw_kpis(doc)
     _draw_summary(doc, summary_text)
     _draw_releases(doc, release_dates)
-    _draw_types_and_media(doc)
     _draw_trend(doc)
+    _draw_types_and_media(doc)
     _draw_meetings_and_plans(doc)
 
     if doc.page_no == 1:  # 주요 기사는 2쪽부터 (미팅·목표가 이미 2쪽으로 넘어갔으면 이어서)
