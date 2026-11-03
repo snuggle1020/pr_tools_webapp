@@ -501,7 +501,7 @@ def _draw_releases(doc, dates):
     doc.top = top - 8
 
 
-def _draw_types_and_trend(doc):
+def _draw_types_and_media(doc):
     p, d = doc.p, doc.data
     doc.top += 22
     gap = 14
@@ -530,42 +530,93 @@ def _draw_types_and_trend(doc):
     p.text(X0 + 14, t + 11, "합계", font=BOLD, size=10)
     p.text(X0 + cw - 14, t + 11, f"{sum(types.values())}건", font=BOLD, size=10, align="right")
 
-    # 월별 추이
+    # 03 매체 유형별 보도 수 (이번 달 실린 기사 전체, 단순언급 포함)
     x0 = X0 + cw + gap
-    doc.section(3, "월별 보도 추이", x=x0, w=cw)
+    doc.section(3, "매체 유형별 보도 수", x=x0, w=cw)
     p.rect(x0, box, cw, h, fill=WHITE, stroke=LINE, r=8)
-    tr = d["trend"]
-    if not tr:
-        p.text(x0 + 14, box + 16, "Summary 시트가 없어 추이를 그리지 않았습니다.", size=9, color=MUTED)
-    else:
-        m = d["month"]
-        tot = [tr["release"][i] + tr["planned"][i] + tr["mention"][i] for i in range(m)]
-        mx = max(tot) or 1
-        chart_h, base = 92, box + 128
-        slot = (cw - 24) / m
-        bw = min(22, slot * 0.6)
-        for i in range(m):
-            cx = x0 + 12 + slot * i + slot / 2
-            cur = i == m - 1
-            y = base
-            for key, _, color in TREND_SERIES:
-                seg = tr[key][i] / mx * chart_h
-                if seg > 0:
-                    p.rect(cx - bw / 2, y - seg, bw, seg, fill=color)
-                    y -= seg
-            if cur:
-                p.c.setStrokeColor(INK)
-                p.c.setLineWidth(1.4)
-                p.c.rect(cx - bw / 2 - 2, p.y(base) - 2 + 0, bw + 4, (base - y) + 4, stroke=1, fill=0)
-            p.text(cx, y - 13, str(tot[i]), font=BOLD if cur else MED, size=8.5, color=INK if cur else MUTED, align="center")
-            p.text(cx, base + 5, f"{i + 1}월", font=BOLD if cur else REG, size=8.5, align="center")
-        lx = x0 + 14
-        for _, name, color in TREND_SERIES:
-            p.rect(lx, box + h - 17, 7, 7, fill=color, r=1.5)
-            lx = p.text(lx + 10, box + h - 18.5, name, size=8.3, color=MUTED) + 9
+    cats = d.get("media_types") or []
+    if not cats:
+        p.text(x0 + 14, box + 16, "이번 달 실린 기사가 없습니다.", size=9, color=MUTED)
+    mx = max((n for _, n in cats), default=0) or 1
+    t = box + 14
+    for name, n in cats:
+        p.text(x0 + 14, t, name, font=MED, size=9.5)
+        bx, bw = x0 + 92, cw - 92 - 50
+        p.rect(bx, t + 2.5, bw, 7, fill=BG, r=3.5)
+        p.rect(bx, t + 2.5, max(7, bw * n / mx), 7, fill=BLUE if n == mx else GRAY, r=3.5)
+        p.text(x0 + cw - 14, t, f"{n}건", font=BOLD, size=9.5, align="right")
+        t += 20
+    if cats:  # 02 와 같은 합계 줄 (02 합계와 같은 높이에)
+        t = box + 14 + 20 * len(TYPE_ORDER)
+        p.hline(x0 + 14, t + 2, cw - 28)
+        p.text(x0 + 14, t + 11, "합계", font=BOLD, size=10)
+        p.text(x0 + cw - 14, t + 11, f"{sum(n for _, n in cats)}건", font=BOLD, size=10, align="right")
     # 02 상자 아래 오른쪽에 기획(오픈피알) 뜻 한 줄
     p.text(X0 + cw - 2, box + h + 6, "※ 기획(오픈피알) - 오픈피알 피칭·컨택 후 작성된 기획 기사", size=7.8, color=MUTED, align="right")
     doc.top = box + h + 16
+
+
+SOFT_BLUE = HexColor("#F2F5FD")
+
+
+def _draw_trend(doc):
+    """04 월별 보도 추이: 1~12월 쌓은 막대 + 같은 세로줄의 형식별 건수 표 (이번 달 세로 띠)."""
+    p, d = doc.p, doc.data
+    tr, m = d["trend"], d["month"]
+    if not tr:
+        return
+    tot = [tr["release"][i] + tr["planned"][i] + tr["mention"][i] for i in range(12)]
+    pad, chart_h, head_h, row_h = 12, 92, 17, 15.5
+    box_h = pad + chart_h + 6 + head_h + 6 * row_h + pad
+    doc.top += 22
+    doc.ensure(26 + box_h)
+    top = doc.top
+    doc.section(4, "월별 보도 추이")
+    bt = top + 26
+    p.rect(X0, bt, W, box_h, fill=WHITE, stroke=LINE, r=8)
+    ix, iw = X0 + 12, W - 24
+    lbl, totw = 58, 34
+    slot = (iw - lbl - totw) / 12
+    cx = lambda i: ix + lbl + slot * i + slot / 2
+    base = bt + pad + chart_h
+    mx = max(tot[:m]) or 1
+    sc = (chart_h - 14) / mx
+    cur = m - 1
+    p.rect(cx(cur) - slot / 2, base + 6, slot, head_h + 6 * row_h, fill=SOFT_BLUE)  # 이번 달 세로 띠
+    bw = min(17, slot * 0.6)
+    for i in range(m):
+        y = base
+        for key, _, col in TREND_SERIES:
+            v = tr[key][i]
+            if v:
+                p.rect(cx(i) - bw / 2, y - v * sc, bw, v * sc, fill=col)
+                y -= v * sc
+        p.text(cx(i), y - 11, str(tot[i]), font=BOLD if i == cur else REG, size=8.3,
+               color=INK if i == cur else MUTED, align="center")
+    t = base + 6
+    p.text(ix, t + 4.5, "형식", size=8.5, color=MUTED)
+    for i in range(12):
+        p.text(cx(i), t + 4.5, f"{i + 1}월", font=BOLD if i == cur else REG, size=8.5,
+               color=INK if i == cur else MUTED, align="center")
+    p.text(ix + iw, t + 4.5, "합계", size=8.5, color=MUTED, align="right")
+    p.hline(ix, t + head_h, iw, color=INK, lw=0.8)
+    t += head_h
+    for key, name, col in TREND_SERIES:
+        p.rect(ix, t + 4.5, 6.5, 6.5, fill=col, r=1.5)
+        p.text(ix + 10, t + 4, name, size=8.5)
+        for i in range(12):
+            v = tr[key][i]
+            p.text(cx(i), t + 4, str(v) if v and i < m else "–", font=BOLD if i == cur else REG, size=8.5,
+                   color=INK if v and i < m else FAINT, align="center")
+        p.text(ix + iw, t + 4, str(sum(tr[key][:m])), size=8.5, align="right")
+        t += row_h
+    p.hline(ix, t, iw, color=INK, lw=0.8)
+    p.text(ix, t + 4, "합계", size=8.5)  # 굵게는 이번 달 세로줄만
+    for i in range(12):
+        p.text(cx(i), t + 4, str(tot[i]) if i < m else "–", font=BOLD if i == cur else REG, size=8.5,
+               color=INK if i < m else FAINT, align="center")
+    p.text(ix + iw, t + 4, str(sum(tot[:m])), size=8.5, align="right")
+    doc.top = bt + box_h
 
 
 def _table(doc, cols, rows, x=X0, w=W, font_size=9, lead=13):
@@ -616,7 +667,7 @@ def _draw_meetings_and_plans(doc):
     start = doc.top
     page = doc.page_no
 
-    doc.section(4, "기자 미팅", x=X0, w=cw)
+    doc.section(5, "기자 미팅", x=X0, w=cw)
     doc.top = start + 26
     if d["meetings"]:
         rows = [{"cells": [(a, REG, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["meetings"]]
@@ -634,7 +685,7 @@ def _draw_meetings_and_plans(doc):
     else:
         x, w, start2 = X0 + cw + gap, cw, start
     doc.top = start2
-    doc.section(5, d["plan_title"], x=x, w=w)
+    doc.section(6, d["plan_title"], x=x, w=w)
     doc.top = start2 + 26
     if d["plans"]:
         rows = [{"cells": [(a, REG, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["plans"]]
@@ -648,7 +699,7 @@ def _draw_meetings_and_plans(doc):
 def _draw_articles(doc, dates):
     """기사 전체를 게재일·매체 순으로 한 표에 (보도자료별 묶음 줄 없이)"""
     arts = doc.data["articles"]
-    doc.section(6, "주요 기사", "제목을 누르면 기사로 이동")
+    doc.section(7, "주요 기사", "제목을 누르면 기사로 이동")
     doc.top += 26
     rows = []
     for no, a in enumerate(arts, 1):
@@ -669,7 +720,7 @@ def _draw_mentions(doc):
     ms = d["mentions"]
     doc.top += 24
     doc.ensure(26 + 22 + 30)
-    doc.section(7, "단순 언급 기사")
+    doc.section(8, "단순 언급 기사")
     doc.top += 26
     if not ms:
         doc.p.text(X0, doc.top, "이번 달 단순 언급 기사가 없습니다.", size=9.5, color=MUTED)
@@ -717,10 +768,15 @@ def build_monthly_pdf(data, release_dates, summary_text=""):
     _draw_kpis(doc)
     _draw_summary(doc, summary_text)
     _draw_releases(doc, release_dates)
-    _draw_types_and_trend(doc)
+    _draw_types_and_media(doc)
+    _draw_trend(doc)
     _draw_meetings_and_plans(doc)
 
-    doc.new_page()
+    if doc.page_no == 1:  # 주요 기사는 2쪽부터 (미팅·목표가 이미 2쪽으로 넘어갔으면 이어서)
+        doc.new_page()
+    else:
+        doc.top += 28
+        doc.ensure(26 + 22 + 30)
     _draw_articles(doc, release_dates)
     _draw_mentions(doc)
     doc.footer()

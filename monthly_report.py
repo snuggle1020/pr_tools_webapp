@@ -16,7 +16,7 @@ from datetime import date, datetime
 
 import openpyxl
 
-from media_order import media_sort_key
+from media_order import MEDIA_GROUPS, media_category, media_sort_key
 from monthly_pdf import TYPE_ORDER, assign_release, summary_rows, trend_from_rows
 
 WORK_VERSION = 1
@@ -181,9 +181,17 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
             "releases": rels, "articles": main, "mentions": mentions,
             "meetings": [x for x in meetings if any(x)], "plans": [p for p in plans if any(p)],
             "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend, "has_past": has_past,
+            "media_types": _media_types(used),
             "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows,
                         "detail": month_detail(main, rels, dates, [x for x in meetings if any(x)])}}
     return data, dates, blank
+
+
+def _media_types(used):
+    """매체 유형별 건수 [(유형, 건수)] - 보고서 매체 순서(통신사·일간지·경제지…)대로, 0건 유형은 뺌."""
+    counts = Counter(media_category(a["media"]) for a in used)
+    order = list(dict.fromkeys(g[1] for g in MEDIA_GROUPS)) + ["확인필요"]
+    return [(c, counts[c]) for c in order if counts.get(c)] + [(c, n) for c, n in counts.items() if c not in order]
 
 
 def month_detail(main, rels, dates, meetings):
