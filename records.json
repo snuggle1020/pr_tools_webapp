@@ -1330,6 +1330,173 @@
      ]
     ]
    }
+  },
+  "더휴식": {
+   "2026-10": {
+    "types": {
+     "인터뷰": 0,
+     "기고": 0,
+     "기획(오픈피알)": 0,
+     "기획(외부)": 4,
+     "보도자료": 14,
+     "단순언급": 3
+    },
+    "articles": [
+     {
+      "media": "서울경제",
+      "title": "더휴식, 650억 프리IPO 유치…2028년 상장 목표 [시그널]",
+      "url": "https://www.sedaily.com/article/20097591?ref=naver",
+      "date": "2026-10-02",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "더벨",
+      "title": "[더벨][스타트업 IR 포인트] '티에스인베 동행' 더휴식, 미드스케일 호...",
+      "url": "https://www.thebell.co.kr/free/content/ArticleView.asp?key=202610021509198840103981",
+      "date": "2026-10-06",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "머니투데이",
+      "title": "\"가치투자 하우스도 꽂혔다\"…더휴식, 650억원 프리IPO 유치",
+      "url": "https://www.mt.co.kr/future/2026/10/20/2026102009135465413",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "지디넷코리아",
+      "title": "더휴식, 650억원 규모 프리IPO 유치…\"2028년 상장 목표\"",
+      "url": "https://zdnet.co.kr/view/?no=20261020133644",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "디지털투데이",
+      "title": "더휴식, 650억원 규모 투자 유치...3~4성급 호텔로 종합숙박솔루션 확장",
+      "url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=708421",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "테크월드",
+      "title": "더휴식, 650억 규모 프리IPO 유치…누적 투자금 1078억",
+      "url": "https://www.epnc.co.kr/news/articleView.html?idxno=408409",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "벤처스퀘어",
+      "title": "더휴식, 650억원 프리IPO 투자 유치…3·4성급 호텔 시장 확대",
+      "url": "https://www.venturesquare.net/1121295/",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "플래텀",
+      "title": "더휴식, 650억원 프리IPO 유치… 3~4성급 호텔 확대 나선다",
+      "url": "https://platum.kr/archives/296597",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "한스경제",
+      "title": "더휴식, 650억 프리IPO 투자 유치…누적 투자금 1,078억 돌파",
+      "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=874480",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "이지경제",
+      "title": "더휴식, 650억 프리IPO 유치…2028년 상장 도전",
+      "url": "https://www.ezyeconomy.com/news/articleView.html?idxno=241001",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "이코노믹리뷰",
+      "title": "더휴식, 650억원 프리IPO 유치로 3~4성급 호텔 확대 나선다",
+      "url": "https://www.econovill.com/news/articleView.html?idxno=754177",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "퍼블릭타임스",
+      "title": "더휴식, 650억원 프리IPO 유치…2028년 상장 추진",
+      "url": "https://www.public25.com/news/articleView.html?idxno=56791",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "벤처타임즈",
+      "title": "더휴식, 650억 원 규모 프리IPO 유치",
+      "url": "https://www.vtimes.kr/news/articleView.html?idxno=56238",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "스타트업엔",
+      "title": "더휴식, 650억 원 프리IPO 유치… 누적 투자금 1,078억 원",
+      "url": "https://www.startupn.kr/news/articleView.html?idxno=60287",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "스타트업투데이",
+      "title": "더휴식, 매출 1,817억 원 내자 650억 원 프리IPO 몰렸다",
+      "url": "https://www.startuptoday.kr/news/articleView.html?idxno=53300",
+      "date": "2026-10-20",
+      "kind": "보도자료"
+     },
+     {
+      "media": "머니투데이",
+      "title": "한방에 200억 베팅 받았다…돈 잘 버는 호텔 스타트업 어디?",
+      "url": "https://www.mt.co.kr/future/2026/10/26/2026102314440866912",
+      "date": "2026-10-24",
+      "kind": "보도자료"
+     },
+     {
+      "media": "이데일리",
+      "title": "[VC's Pick]韓 상륙한 리걸테크 '레고라', 시리즈E 투자 유치",
+      "url": "https://www.edaily.co.kr/News/Read?newsId=02046726645616200&mediaCodeNo=257&utm_source=naver&utm_medium=referral&utm_campaign=news_syndication&utm_content=original_article",
+      "date": "2026-10-24",
+      "kind": "기획(외부)"
+     },
+     {
+      "media": "머니투데이",
+      "title": "영상제작부터 의료기기까지 잇단 초기투자…프롭테크 후기 메가딜도",
+      "url": "https://www.mt.co.kr/future/2026/10/25/2026102515204626680",
+      "date": "2026-10-25",
+      "kind": "기획(외부)"
+     }
+    ],
+    "releases": [
+     {
+      "title": "더휴식, 650억 원 규모 프리IPO 유치... 누적 투자금 1,078억 원",
+      "date": "2026-10-20",
+      "count": 14
+     }
+    ],
+    "meetings": [
+     [
+      "매경럭스맨"
+     ],
+     [
+      "한스경제"
+     ],
+     [
+      "이코노믹리뷰"
+     ],
+     [
+      "디지털투데이"
+     ],
+     [
+      "테크월드"
+     ],
+     [
+      "EBN"
+     ]
+    ]
+   }
   }
  }
 }
