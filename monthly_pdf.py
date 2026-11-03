@@ -559,15 +559,22 @@ def _draw_types_and_media(doc):
 SOFT_BLUE = HexColor("#F2F5FD")
 
 
+# 02 표 묶음: (구분, 형식 키들, 소계 이름) - 기획(외부)도 '기획'이라 오픈PR 에 들어감
+TREND_GROUPS = [("오픈PR", ["release", "plan", "interview", "contrib"], "오픈 PR 합계"), ("외부", ["mention"], "외부 PR 합계")]
+
+
 def _draw_trend(doc):
-    """02 월별 보도 추이: 1~12월 쌓은 막대 + 같은 세로줄의 형식별 건수 표 (이번 달 세로 띠)."""
+    """02 월별 보도 추이: 1~12월 쌓은 막대 + 같은 세로줄의 형식별 건수 표 (이번 달 세로 띠).
+    표는 오픈PR(보도자료·기획·인터뷰·기고) / 외부(단순언급)로 묶고 묶음마다 소계 줄."""
     p, d = doc.p, doc.data
     tr, m = d["trend"], d["month"]
     if not tr:
         return
+    names = {k: (n, c) for k, n, c in TREND_SERIES}
     tot = [tr["release"][i] + tr["planned"][i] + tr["mention"][i] for i in range(12)]
+    n_rows = sum(len(keys) + 1 for _, keys, _ in TREND_GROUPS) + 1
     pad, chart_h, head_h, row_h = 12, 92, 17, 15.5
-    box_h = pad + chart_h + 6 + head_h + 6 * row_h + pad
+    box_h = pad + chart_h + 6 + head_h + n_rows * row_h + pad
     doc.top += 22
     doc.ensure(26 + box_h)
     top = doc.top
@@ -575,14 +582,12 @@ def _draw_trend(doc):
     bt = top + 26
     p.rect(X0, bt, W, box_h, fill=WHITE, stroke=LINE, r=8)
     ix, iw = X0 + 12, W - 24
-    lbl, totw = 58, 34
-    slot = (iw - lbl - totw) / 12
+    glw, lbl = 40, 96  # 구분 칸, 구분+형식 칸 폭
+    slot = (iw - lbl - 34) / 12
     cx = lambda i: ix + lbl + slot * i + slot / 2
     base = bt + pad + chart_h
-    mx = max(tot[:m]) or 1
-    sc = (chart_h - 14) / mx
+    sc = (chart_h - 14) / (max(tot[:m]) or 1)
     cur = m - 1
-    p.rect(cx(cur) - slot / 2, base + 6, slot, head_h + 6 * row_h, fill=SOFT_BLUE)  # 이번 달 세로 띠
     bw = min(17, slot * 0.6)
     for i in range(m):
         y = base
@@ -594,28 +599,44 @@ def _draw_trend(doc):
         p.text(cx(i), y - 11, str(tot[i]), font=BOLD if i == cur else REG, size=8.3,
                color=INK if i == cur else MUTED, align="center")
     t = base + 6
-    p.text(ix, t + 4.5, "형식", size=8.5, color=MUTED)
+    band_l, band_r = cx(cur) - slot / 2, cx(cur) + slot / 2
+    p.rect(band_l, t, slot, head_h + n_rows * row_h, fill=SOFT_BLUE)  # 이번 달 세로 띠
+    p.text(ix, t + 4.5, "구분", size=8.5, color=MUTED)
+    p.text(ix + glw, t + 4.5, "형식", size=8.5, color=MUTED)
     for i in range(12):
         p.text(cx(i), t + 4.5, f"{i + 1}월", font=BOLD if i == cur else REG, size=8.5,
                color=INK if i == cur else MUTED, align="center")
     p.text(ix + iw, t + 4.5, "합계", size=8.5, color=MUTED, align="right")
     p.hline(ix, t + head_h, iw, color=INK, lw=0.8)
     t += head_h
-    for key, name, col in TREND_SERIES:
-        p.rect(ix, t + 4.5, 6.5, 6.5, fill=col, r=1.5)
-        p.text(ix + 10, t + 4, name, size=8.5)
+
+    def row(label, vals, label_x, swatch=None, shade=False, always=False):
+        """한 줄: 월별 값(굵게는 이번 달만) + 맨 오른쪽 누적. 0 은 '–' (전체 합계 줄만 숫자)."""
+        nonlocal t
+        if shade:  # 소계 줄 음영 (이번 달 세로 띠는 비워 둠)
+            p.rect(ix, t, band_l - ix, row_h, fill=BG)
+            p.rect(band_r, t, ix + iw - band_r, row_h, fill=BG)
+        if swatch is not None:
+            p.rect(label_x, t + 4.5, 6.5, 6.5, fill=swatch, r=1.5)
+            label_x += 10
+        p.text(label_x, t + 4, label, size=8.5)
         for i in range(12):
-            v = tr[key][i]
-            p.text(cx(i), t + 4, str(v) if v and i < m else "–", font=BOLD if i == cur else REG, size=8.5,
-                   color=INK if v and i < m else FAINT, align="center")
-        p.text(ix + iw, t + 4, str(sum(tr[key][:m])), size=8.5, align="right")
+            show = i < m and (vals[i] or always)
+            p.text(cx(i), t + 4, str(vals[i]) if show else "–", font=BOLD if i == cur else REG, size=8.5,
+                   color=INK if show else FAINT, align="center")
+        p.text(ix + iw, t + 4, str(sum(vals[:m])), size=8.5, align="right")
         t += row_h
+
+    for group, keys, sub in TREND_GROUPS:
+        g_top = t
+        for k in keys:
+            row(names[k][0], tr[k], ix + glw, swatch=names[k][1])
+        p.text(ix, g_top + (t - g_top) / 2 - 4.5, group, size=8.5, color=MUTED)
+        p.hline(ix + glw, t, iw - glw)
+        row(sub, [sum(tr[k][i] for k in keys) for i in range(12)], ix + glw, shade=True)
+        p.hline(ix, t, iw)
     p.hline(ix, t, iw, color=INK, lw=0.8)
-    p.text(ix, t + 4, "합계", size=8.5)  # 굵게는 이번 달 세로줄만
-    for i in range(12):
-        p.text(cx(i), t + 4, str(tot[i]) if i < m else "–", font=BOLD if i == cur else REG, size=8.5,
-               color=INK if i < m else FAINT, align="center")
-    p.text(ix + iw, t + 4, str(sum(tot[:m])), size=8.5, align="right")
+    row("합계", tot, ix, always=True)
     doc.top = bt + box_h
 
 
