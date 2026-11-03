@@ -263,7 +263,7 @@ def default_summary(data, release_dates=None):
     전월 건수가 있으면 형식별로 전월과 비교: 보도자료 배포 → 단순 언급 → 기획·인터뷰·기고.
     전월 건수가 없으면(1월이거나 기록 없음) 이달 내용만 정리한다."""
     m, t = data["month"], data["types"]
-    tr = data["trend"]
+    tr = data["trend"] if data.get("has_past", True) else None
     if not (tr and m > 1):
         return _summary_without_prev(data, release_dates)
     i = m - 2
@@ -420,7 +420,7 @@ class _Doc:
 def _draw_kpis(doc):
     p, d = doc.p, doc.data
     total = sum(d["types"].values())
-    tr = d["trend"]
+    tr = d["trend"] if d.get("has_past", True) else None  # 지난 기록이 없으면 전월 비교·누적은 뺌
     cells = [(str(total), "건", "이번 달 총 보도 건수", BLUE)]
     if tr and d["month"] > 1:
         i = d["month"] - 2

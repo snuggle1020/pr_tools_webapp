@@ -175,12 +175,12 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
     for k in TYPE_ORDER:
         rows[k][m - 1] = types[k]
     has_past = any(rows[k][i] for k in TYPE_ORDER for i in range(m - 1))
-    trend = trend_from_rows(rows) if has_past else None  # 지난 기록이 없으면 추이·전월 비교는 빼고 그림
+    trend = trend_from_rows(rows)  # 지난 달이 전부 0이어도 월별 추이 그래프는 그림 (전월 비교·누적은 has_past 일 때만)
 
     data = {"company": meta["company"], "year": meta["year"], "month": m, "types": types,
             "releases": rels, "articles": main, "mentions": mentions,
             "meetings": [x for x in meetings if any(x)], "plans": [p for p in plans if any(p)],
-            "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend,
+            "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend, "has_past": has_past,
             "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows,
                         "detail": month_detail(main, rels, dates, [x for x in meetings if any(x)])}}
     return data, dates, blank
