@@ -771,6 +771,35 @@ def read_history(pdf_bytes):
         return None
 
 
+def _draw_competitors(doc):
+    """09 경쟁사 비교: 형식별 건수 표(우리 회사 줄은 굵게) + 경쟁사 보도자료 목록(제목 누르면 대표 기사)."""
+    p, rows = doc.p, doc.data["competitors"]
+    doc.top += 24
+    doc.ensure(26 + 22 + 30 * len(rows) + 60)
+    doc.section(9, "경쟁사 비교", "네이버 뉴스 기준")
+    doc.top += 26
+    trs = []
+    for r in rows:
+        f = BOLD if r.get("own") else REG
+        num = lambda v: (f"{v}건" if v else "–", f, INK if v else MUTED)
+        trs.append({"cells": [(r["name"], f, INK), num(r["n_rel"]), num(r["rel_articles"]), num(r["plan"]),
+                              num(r["stock"]), num(r["mention"]), (f"{r['total']}건", f, INK)]})
+    _table(doc, [("기업", None, "left"), ("배포 건수", 76, "center"), ("보도자료", 70, "center"),
+                 ("기획·인터뷰", 70, "center"), ("주가·시황", 70, "center"), ("단순언급", 70, "center"),
+                 ("총 게재 수", 70, "center")], trs)
+    rl = [{"cells": [(r["name"], REG, INK), (x["title"], REG, INK),
+                     (f"{x['date'].month}.{x['date'].day}" if x["date"] else "", REG, MUTED), (f"{x['count']}건", REG, INK)],
+           "link": (1, x["url"])} for r in rows if not r.get("own") for x in r["releases"]]
+    if not rl:
+        return
+    doc.top += 20
+    doc.ensure(18 + 22 + 30)
+    p.text(X0, doc.top, "경쟁사 보도자료", font=SEMI, size=10)
+    p.text(X0 + W, doc.top + 1, "제목을 누르면 대표 기사로 이동", size=9, color=MUTED, align="right")
+    doc.top += 18
+    _table(doc, [("기업", 70, "left"), ("제목", None, "left"), ("배포일", 46, "center"), ("게재 수", 54, "center")], rl)
+
+
 def build_monthly_pdf(data, release_dates, summary_text=""):
     """data: read_month_report() / monthly_report.compose() 결과, release_dates: 보도자료 순서대로 배포일(date).
     data['history'] 가 있으면 다음 달에 이 PDF만 올려도 월별 추이가 이어지도록 PDF 정보(키워드)에 숨겨 넣는다.
@@ -800,6 +829,8 @@ def build_monthly_pdf(data, release_dates, summary_text=""):
         doc.ensure(26 + 22 + 30)
     _draw_articles(doc, release_dates)
     _draw_mentions(doc)
+    if data.get("competitors"):
+        _draw_competitors(doc)
     doc.footer()
     c.save()
     return buf.getvalue()

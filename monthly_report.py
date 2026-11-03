@@ -136,12 +136,13 @@ def auto_group_mentions(articles):
 
 # ---------------------------------------------------------------- 편집 결과 -> PDF 데이터
 
-def compose(meta, articles, releases, meetings, plans, trend_rows):
+def compose(meta, articles, releases, meetings, plans, trend_rows, competitors=None):
     """meta: {'company','year','month'} / articles: [{'url','media','title','date','kind','include','group'}]
     releases: [{'title','date','deleted','count'(삭제 건만 직접 넣은 게재 수)}] / meetings, plans: [(a,b,c)] / trend_rows: 월별 기록 {형식: [12]} 또는 None.
     반환: (monthly_pdf 용 data, 보도자료 배포일 목록, 형식 미지정 기사 수)
     이번 달 칸은 표에서 센 값으로 덮어쓰고, 그 기록을 data['history'] 로 PDF에 숨겨 넣게 한다.
-    '게재 후 삭제'한 보도자료의 기사는 건수·기사 목록·월별 기록에서 모두 뺀다 (카드만 회색으로 남김)."""
+    '게재 후 삭제'한 보도자료의 기사는 건수·기사 목록·월별 기록에서 모두 뺀다 (카드만 회색으로 남김).
+    competitors: [{'name', 'articles': [{'url','media','title','date','kind'(COMP_KINDS)}]}] - 있으면 PDF 09 경쟁사 비교."""
     dates = [r["date"] for r in releases]
     gone = {i for i, r in enumerate(releases) if r.get("deleted")}
     used = [a for a in articles if a["include"] and a["kind"] and assign_release(a, dates) not in gone]
@@ -182,9 +183,69 @@ def compose(meta, articles, releases, meetings, plans, trend_rows):
             "meetings": [x for x in meetings if any(x)], "plans": [p for p in plans if any(p)],
             "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend, "has_past": has_past,
             "media_types": _media_types(used),
+            "competitors": _competitor_rows(meta["company"], used, rels, competitors) if competitors else None,
             "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows,
                         "detail": month_detail(main, rels, dates, [x for x in meetings if any(x)])}}
     return data, dates, blank
+
+
+# ---------------------------------------------------------------- 경쟁사 비교 (PDF 09)
+
+COMP_KINDS = ["보도자료", "기획·인터뷰", "주가·시황", "단순언급"]
+# 종목 나열·시세 기사 제목에 자주 나오는 말 (경쟁사 기사 자동 분류용)
+STOCK_WORDS = re.compile(r"주[가식]|테마주|관련주|[가-힣]+주에|[가-힣]+주|株|매수|순매도|상승|하락|급등|급락|강세|약세|시황|"
+                         r"코스피|코스닥|랠리|희비|트래커|DAT|상폐|청산|비트코인|가상자산|가상화폐|코인|실적")
+COMP_RELEASE_DAYS = 2  # 경쟁사 보도자료: 첫 기사부터 며칠 안의 같은 소식까지 한 건으로
+
+
+def _story_groups(articles, keyword):
+    """먼저 실린 기사부터, COMP_RELEASE_DAYS 안의 같은 소식(_same_story)끼리 묶음."""
+    groups = []
+    for a in sorted(articles, key=lambda a: a["date"] or date.max):
+        ba = _bigrams(a["title"], keyword)
+        g = next((g for g in groups if a["date"] and g[0][0]["date"]
+                  and (a["date"] - g[0][0]["date"]).days <= COMP_RELEASE_DAYS
+                  and any(_same_story(a, x, ba, bx) for x, bx in g)), None)
+        (g.append((a, ba)) if g else groups.append([(a, ba)]))
+    return [[a for a, _ in g] for g in groups]
+
+
+def classify_competitor(name, articles):
+    """경쟁사 기사 형식 자동 분류 (articles 의 'kind' 를 채움). 10월 버넥트·비트맥스 63건 중 62건이 사람 판단과 같았음.
+    보도자료: 같은 소식 2건 이상 + 제목 절반 이상이 기업명으로 시작 / 주가·시황: STOCK_WORDS /
+    기획·인터뷰: 제목에 기업명 / 단순언급: 나머지."""
+    rel = set()
+    for g in _story_groups(articles, name):
+        if len(g) >= 2 and sum(a["title"].startswith(name) for a in g) * 2 >= len(g):
+            rel |= {id(a) for a in g}
+    for a in articles:
+        a["kind"] = ("보도자료" if id(a) in rel else "주가·시황" if STOCK_WORDS.search(a["title"])
+                     else "기획·인터뷰" if name in a["title"] else "단순언급")
+    return articles
+
+
+def competitor_summary(name, articles):
+    """담당자가 확인한 형식으로 센 경쟁사 한 줄 + 보도자료 목록(같은 소식끼리 한 건, 대표 기사는 기업명으로 시작하는 첫 기사)."""
+    rel_arts = [a for a in articles if a["kind"] == "보도자료"]
+    releases = []
+    for g in _story_groups(rel_arts, name):
+        lead = next((a for a in g if a["title"].startswith(name)), _lead(g))
+        releases.append({"title": lead["title"], "url": lead["url"], "date": g[0]["date"], "count": len(g)})
+    n = Counter(a["kind"] for a in articles)
+    return {"name": name, "n_rel": len(releases), "releases": releases, "rel_articles": len(rel_arts),
+            "plan": n.get("기획·인터뷰", 0), "stock": n.get("주가·시황", 0), "mention": n.get("단순언급", 0),
+            "total": len(articles)}
+
+
+def _competitor_rows(company, used, rels, competitors):
+    """09 표: 우리 회사(경쟁사와 같은 네이버 기준 - ②-1 로 직접 넣은 기사는 뺌) + 경쟁사들."""
+    nav = Counter(a["kind"] for a in used if a.get("naver", True))
+    own = {"name": company, "own": True, "n_rel": sum(1 for r in rels if not r["deleted"]), "releases": [],
+           "rel_articles": nav.get("보도자료", 0),
+           "plan": sum(nav.get(k, 0) for k in ("기획(오픈피알)", "기획(외부)", "인터뷰", "기고")),
+           "stock": 0, "mention": nav.get("단순언급", 0)}
+    own["total"] = own["rel_articles"] + own["plan"] + own["mention"]
+    return [own] + [competitor_summary(c["name"], c["articles"]) for c in competitors]
 
 
 def _media_types(used):
@@ -247,7 +308,7 @@ def trend_rows_from_xlsx(base_bytes):
 
 # ---------------------------------------------------------------- 작업 파일
 
-def dump_work(meta, articles, releases, meetings, plans, summary, trend_rows) -> bytes:
+def dump_work(meta, articles, releases, meetings, plans, summary, trend_rows, competitors=None) -> bytes:
     d = lambda x: x.isoformat() if x else None
     out = {
         "version": WORK_VERSION, "kind": "monthly",
@@ -257,6 +318,8 @@ def dump_work(meta, articles, releases, meetings, plans, summary, trend_rows) ->
         "releases": [{"title": r["title"], "date": d(r["date"]), "deleted": r.get("deleted", False),
                       "count": int(r.get("count") or 0)} for r in releases],
         "meetings": [list(m) for m in meetings], "plans": [list(p) for p in plans],
+        "competitors": [{"name": c["name"], "articles": [{**a, "date": d(a["date"])} for a in c["articles"]]}
+                        for c in (competitors or [])],
     }
     return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
 
@@ -273,6 +336,8 @@ def load_work(raw: bytes) -> dict:
                          for r in w.get("releases", [])]
         w["meetings"] = [tuple(m) for m in w.get("meetings", [])]
         w["plans"] = [tuple(p) for p in w.get("plans", [])]
+        w["competitors"] = [{"name": c["name"], "articles": [{**a, "date": d(a.get("date"))} for a in c["articles"]]}
+                            for c in w.get("competitors", [])]
         w["meta"]["year"], w["meta"]["month"] = int(w["meta"]["year"]), int(w["meta"]["month"])
     except Exception:
         raise ValueError("월간 리포트 작업 파일을 읽을 수 없습니다. 이 탭의 '💾 작업 저장'으로 받은 .json 파일인지 확인하세요.")

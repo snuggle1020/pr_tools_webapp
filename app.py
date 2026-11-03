@@ -34,7 +34,8 @@ from daily_collect_sheet import build_daily_sheet
 from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf
 from monthly_pdf import default_summary as monthly_summary, read_history as read_pdf_history
 from monthly_report import (
-    KIND_OPTIONS, auto_group_mentions, auto_mark_releases, compose, guess_releases, history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
+    COMP_KINDS, KIND_OPTIONS, auto_group_mentions, auto_mark_releases, classify_competitor, competitor_summary, compose, guess_releases,
+    history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
 from annual_report import (
@@ -592,6 +593,7 @@ with tab2:
             st.session_state["monthly"] = {
                 **w["meta"], "articles": w["articles"], "releases": w["releases"], "meetings": w["meetings"],
                 "plans": w["plans"], "summary": w["summary"], "trend_rows": w["trend_rows"],
+                "competitors": w["competitors"], "comp_names": ", ".join(c["name"] for c in w["competitors"]),
             }
             st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
             st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
@@ -656,7 +658,7 @@ with tab2:
                     arts.append({
                         "url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": t,
                         "date": it["_dt"].date(), "kind": initial_kind(t, m_keyword, auto.get(id(it))),
-                        "include": True, "group": "",
+                        "include": True, "group": "", "naver": True,  # 09 경쟁사 비교는 네이버 기사만 셈
                     })
                 m_rels = guess_releases(arts, m_keyword)
                 n_rel = auto_mark_releases(arts, m_rels, m_keyword)  # 제목에 키워드 없는 우리 보도자료 기사
@@ -666,6 +668,7 @@ with tab2:
                     "articles": arts, "releases": m_rels, "meetings": [], "plans": [],
                     "summary": None, "trend_rows": history_from_secrets(st.secrets, m_keyword, int(m_year)),
                     "auto_note": (n_rel, n_grp),
+                    "competitors": [], "comp_names": (st.session_state.get("monthly") or {}).get("comp_names", ""),
                 }
                 st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
                 st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
@@ -780,7 +783,7 @@ with tab2:
             text = lambda k, fb: fb if pd.isna(r[k]) else str(r[k]).strip()
             d = r["게재일"]
             articles.append({
-                "url": a["url"], "include": bool(r["포함"]),
+                "url": a["url"], "include": bool(r["포함"]), "naver": a.get("naver", True),
                 "kind": "" if pd.isna(r["형식"]) or r["형식"] is None else str(r["형식"]),
                 "group": text("묶음", ""), "media": text("매체", a["media"]), "title": text("제목", a["title"]),
                 "date": d if isinstance(d, date) and not pd.isna(d) else a["date"],
@@ -852,11 +855,50 @@ with tab2:
         has_hist = any(hist_rows[k][i] for k in TYPE_ORDER for i in range(M["month"] - 1))
         trend_input = hist_rows if has_hist else None
 
-        meta = {"company": company_name.strip() or M["company"], "year": M["year"], "month": M["month"]}
-        mdata, rel_dates, n_blank = compose(meta, articles, releases, meetings, plans, trend_input)
+        # ⑥ 경쟁사 비교 (PDF 09) - 경쟁사도 네이버에서 같은 기준으로 모으고, 담당자는 형식만 확인
+        st.markdown("##### ⑥ 경쟁사 비교")
+        st.caption("경쟁사 이름을 넣고 수집하면 그달 네이버 기사를 모아 **보도자료 / 기획·인터뷰 / 주가·시황 / 단순언급**으로 자동 분류합니다. "
+                   "틀린 형식만 고치세요. 비교 표의 우리 회사 숫자도 네이버 기사만 셉니다(②-1로 직접 넣은 기사 제외). "
+                   "이름을 지우면 PDF에서 빠집니다.")
+        cc1, cc2 = st.columns([5, 1.4], vertical_alignment="bottom")
+        comp_names = cc1.text_input("경쟁사 (쉼표로 구분)", value=M.get("comp_names", ""), placeholder="버넥트, 비트맥스",
+                                    key=f"m_comp_names_{run}")
+        comp_go = cc2.button("🔎 경쟁사 기사 수집", key=f"m_comp_go_{run}", width="stretch")
+        M["comp_names"] = comp_names
+        names_now = [n.strip() for n in re.split(r"[,\n]", comp_names) if n.strip()]
+        competitors = [c for c in (M.get("competitors") or []) if c["name"] in names_now]
+        for c in competitors:
+            with st.expander(f"{c['name']} · 기사 {len(c['articles'])}건"):
+                if not c["articles"]:
+                    st.caption("이 달 네이버에 기업명이 정확히 들어간 기사가 없습니다. 이름이 맞는지 확인하세요.")
+                    continue
+                c_df = st.data_editor(
+                    pd.DataFrame([{"형식": a["kind"], "매체": a["media"], "제목": a["title"], "게재일": a["date"], "URL": a["url"]}
+                                  for a in c["articles"]]),
+                    hide_index=True, width="stretch", disabled=["매체", "제목", "게재일", "URL"],
+                    key=f"m_comp_{run}_{c['name']}",
+                    column_config={
+                        "형식": st.column_config.SelectboxColumn("형식", options=COMP_KINDS, width="small", required=True),
+                        "매체": st.column_config.TextColumn("매체", width="small"),
+                        "제목": st.column_config.TextColumn("제목", width="large"),
+                        "게재일": st.column_config.DateColumn("게재일", format="MM-DD", width="small"),
+                        "URL": st.column_config.LinkColumn("원문", display_text="열기", width="small"),
+                    },
+                )
+                for (_, r), a in zip(c_df.iterrows(), c["articles"]):  # 고친 형식은 바로 저장 (다시 그려도 유지)
+                    a["kind"] = r["형식"] if r["형식"] in COMP_KINDS else a["kind"]
+                cs = competitor_summary(c["name"], c["articles"])
+                st.caption(f"배포 {cs['n_rel']}건 · 보도자료 {cs['rel_articles']} · 기획·인터뷰 {cs['plan']} · "
+                           f"주가·시황 {cs['stock']} · 단순언급 {cs['mention']} · 총 {cs['total']}건")
+        comp_err = st.session_state.pop("m_comp_err", None)
+        if comp_err:
+            st.warning("경쟁사 기사를 가져오지 못했습니다: " + " / ".join(comp_err))
 
-        # ⑤ 요약
-        st.markdown("##### ⑥ 이달의 요약")
+        meta = {"company": company_name.strip() or M["company"], "year": M["year"], "month": M["month"]}
+        mdata, rel_dates, n_blank = compose(meta, articles, releases, meetings, plans, trend_input, competitors)
+
+        # ⑦ 요약
+        st.markdown("##### ⑦ 이달의 요약")
         s_key, auto_key = f"m_summary_{run}", f"m_summary_auto_{run}"
         auto_text = monthly_summary(mdata, rel_dates)
         # 아직 손대지 않았으면(자동 문장 그대로면) 표를 고칠 때마다 자동 문장도 새로 맞춤. 직접 고친 뒤에는 건드리지 않음
@@ -886,6 +928,35 @@ with tab2:
             st.session_state["m_run"] = run + 1
             st.rerun()
 
+        if comp_go:  # 고친 내용은 그대로 두고 경쟁사 기사만 새로 모음
+            new_c, errs = [], []
+            with st.spinner(f"경쟁사 {len(names_now)}곳 {M['month']}월 기사 수집 중..."):
+                for nm in names_now:
+                    try:
+                        items_c = fetch_month_articles(nm, M["year"], M["month"], NAVER_CLIENT_ID, NAVER_CLIENT_SECRET)
+                    except Exception as e:
+                        errs.append(f"{nm} ({e})")
+                        continue
+                    new_c.append({"name": nm, "articles": [
+                        {"url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": clean_html(it["title"]),
+                         "date": it["_dt"].date(), "kind": ""} for it in items_c]})
+                cut = [{"제목": a["title"], "URL": a["url"], "_a": a} for c in new_c for a in c["articles"]
+                       if a["title"].rstrip().endswith(("...", "…"))]
+                if cut:  # 보도자료 목록에 나갈 제목이 잘리지 않게
+                    dmap = load_domain_map()
+                    with ThreadPoolExecutor(max_workers=6) as pool:
+                        list(pool.map(lambda r: complete_truncated_titles([r], dmap), cut))
+                    for r in cut:
+                        r["_a"]["title"] = r["제목"]
+                for c in new_c:
+                    classify_competitor(c["name"], c["articles"])
+            if errs:
+                st.session_state["m_comp_err"] = errs
+            M.update(articles=articles, releases=releases, meetings=meetings, plans=plans, summary=summary_text,
+                     company=meta["company"], trend_rows=trend_input, competitors=new_c)
+            st.session_state["m_run"] = run + 1
+            st.rerun()
+
         if add_go:  # 지금까지 고친 내용을 저장한 뒤 기사를 붙이고 표를 다시 그림
             urls = [u.rstrip(".,)") for u in re.findall(r"https?://[^\s<>\"']+", add_text or "")]
             have = {normalize_url(a["url"]) for a in articles}
@@ -900,7 +971,7 @@ with tab2:
                     t_new = meta_a["제목"] or u
                     new.append({"url": meta_a["URL"], "media": meta_a["매체명"], "title": t_new, "date": pub,
                                 "kind": initial_kind(t_new, M.get("keyword") or M["company"], None),
-                                "include": True, "group": ""})
+                                "include": True, "group": "", "naver": False})
                     have.add(normalize_url(u))
             merged = articles + new
             # 새로 넣은 기사도 같은 기준으로: 우리 보도자료와 같은 소식이면 보도자료, 단순언급은 같은 소식끼리 묶음
@@ -947,7 +1018,7 @@ with tab2:
             getattr(st, m_saved[0])(m_saved[1])
         b2.download_button(
             "💾 작업 저장 (중간 저장용)",
-            data=dump_month_work(meta, articles, releases, meetings, plans, summary_text, trend_input),
+            data=dump_month_work(meta, articles, releases, meetings, plans, summary_text, trend_input, competitors),
             file_name=f"월간작업_{meta['company']}_{M['year']}{M['month']:02d}.json", mime="application/json",
             width="stretch", on_click="ignore", key="m_dl_work",
             help="작업을 나중에 이어서 하려면 이 파일을 받아두었다가 맨 위 '이전 작업 불러오기'에 올리세요.",
