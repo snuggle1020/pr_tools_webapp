@@ -868,7 +868,9 @@ with tab2:
         names_now = [n.strip() for n in re.split(r"[,\n]", comp_names) if n.strip()]
         competitors = [c for c in (M.get("competitors") or []) if c["name"] in names_now]
         for c in competitors:
-            with st.expander(f"{c['name']} · 기사 {len(c['articles'])}건"):
+            with st.expander(f"{c['name']}" + (f" ({c['category']})" if c.get("category") else "") + f" · 기사 {len(c['articles'])}건"):
+                c["category"] = st.text_input("분류 (PDF 표 맨 왼쪽 칸, 예: DAO / DAO,DSC / LOGI.FINE)",
+                                              value=c.get("category", ""), key=f"m_comp_cat_{run}_{c['name']}")
                 if not c["articles"]:
                     st.caption("이 달 네이버에 기업명이 정확히 들어간 기사가 없습니다. 이름이 맞는지 확인하세요.")
                     continue
@@ -937,7 +939,8 @@ with tab2:
                     except Exception as e:
                         errs.append(f"{nm} ({e})")
                         continue
-                    new_c.append({"name": nm, "articles": [
+                    old_cat = next((c.get("category", "") for c in (M.get("competitors") or []) if c["name"] == nm), "")
+                    new_c.append({"name": nm, "category": old_cat, "articles": [
                         {"url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": clean_html(it["title"]),
                          "date": it["_dt"].date(), "kind": ""} for it in items_c]})
                 cut = [{"제목": a["title"], "URL": a["url"], "_a": a} for c in new_c for a in c["articles"]

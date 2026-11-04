@@ -783,16 +783,21 @@ def _draw_competitors(doc):
     doc.ensure(26 + 22 + 30 * len(rows) + 60)
     doc.section(9, "경쟁사 비교", "네이버 뉴스 기준")
     doc.top += 26
+    has_cat = any(r.get("category") for r in rows)  # 분류를 하나라도 넣었으면 맨 왼쪽에 분류 칸
     trs = []
     for r in rows:
         f = BOLD if r.get("own") else REG
         num = lambda v: (f"{v}건" if v else "–", f, INK if v else MUTED)
         rel = (f"{r['rel_articles']}건 ({r['n_rel']}건)" if r["rel_articles"] else "–", f, INK if r["rel_articles"] else MUTED)
-        trs.append({"cells": [(r["name"], f, INK), rel, num(r["plan"]), num(r["stock"]), num(r["mention"]),
-                              (f"{r['total']}건", f, INK)]})
-    cw = (W - 80 - 110) / 4  # 기업 80, 보도자료(글이 길어서) 110, 나머지 네 칸은 같은 폭
-    _table(doc, [("기업", 80, "left"), ("보도자료 (배포 건수)", 110, "center"), ("기획·인터뷰", cw, "center"),
-                 ("주가·시황", cw, "center"), ("단순언급", cw, "center"), ("총 게재 수", cw, "center")], trs)
+        cat = [("" if r.get("own") else (r.get("category") or "–"), f, INK if r.get("category") else MUTED)] if has_cat else []
+        trs.append({"cells": cat + [(r["name"], f, INK), rel, num(r["plan"]), num(r["stock"]), num(r["mention"]),
+                                    (f"{r['total']}건", f, INK)]})
+    # 전부 가운데 정렬, '보도자료 (배포 건수)'만 글이 길어서 조금 넓게, 나머지는 같은 폭
+    rel_w = 100
+    cw = (W - rel_w) / (6 if has_cat else 5)
+    head = [("분류", cw, "center")] if has_cat else []
+    _table(doc, head + [("기업", cw, "center"), ("보도자료 (배포 건수)", rel_w, "center"), ("기획·인터뷰", cw, "center"),
+                        ("주가·시황", cw, "center"), ("단순언급", cw, "center"), ("총 게재 수", cw, "center")], trs)
     rl = [{"cells": [(r["name"], REG, INK), (x["title"], REG, INK),
                      (f"{x['date'].month}.{x['date'].day}" if x["date"] else "", REG, MUTED), (f"{x['count']}건", REG, INK)],
            "link": (1, x["url"])} for r in rows if not r.get("own") for x in r["releases"]]

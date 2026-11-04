@@ -142,7 +142,8 @@ def compose(meta, articles, releases, meetings, plans, trend_rows, competitors=N
     반환: (monthly_pdf 용 data, 보도자료 배포일 목록, 형식 미지정 기사 수)
     이번 달 칸은 표에서 센 값으로 덮어쓰고, 그 기록을 data['history'] 로 PDF에 숨겨 넣게 한다.
     '게재 후 삭제'한 보도자료의 기사는 건수·기사 목록·월별 기록에서 모두 뺀다 (카드만 회색으로 남김).
-    competitors: [{'name', 'articles': [{'url','media','title','date','kind'(COMP_KINDS)}]}] - 있으면 PDF 09 경쟁사 비교."""
+    competitors: [{'name', 'category'(분류, 예: DAO), 'articles': [{'url','media','title','date','kind'(COMP_KINDS)}]}]
+    - 있으면 PDF 09 경쟁사 비교."""
     dates = [r["date"] for r in releases]
     gone = {i for i, r in enumerate(releases) if r.get("deleted")}
     used = [a for a in articles if a["include"] and a["kind"] and assign_release(a, dates) not in gone]
@@ -245,7 +246,8 @@ def _competitor_rows(company, used, rels, competitors):
            "plan": sum(nav.get(k, 0) for k in ("기획(오픈피알)", "기획(외부)", "인터뷰", "기고")),
            "stock": 0, "mention": nav.get("단순언급", 0)}
     own["total"] = own["rel_articles"] + own["plan"] + own["mention"]
-    return [own] + [competitor_summary(c["name"], c["articles"]) for c in competitors]
+    return [own] + [{**competitor_summary(c["name"], c["articles"]), "category": (c.get("category") or "").strip()}
+                    for c in competitors]
 
 
 def _media_types(used):
@@ -318,7 +320,8 @@ def dump_work(meta, articles, releases, meetings, plans, summary, trend_rows, co
         "releases": [{"title": r["title"], "date": d(r["date"]), "deleted": r.get("deleted", False),
                       "count": int(r.get("count") or 0)} for r in releases],
         "meetings": [list(m) for m in meetings], "plans": [list(p) for p in plans],
-        "competitors": [{"name": c["name"], "articles": [{**a, "date": d(a["date"])} for a in c["articles"]]}
+        "competitors": [{"name": c["name"], "category": c.get("category", ""),
+                         "articles": [{**a, "date": d(a["date"])} for a in c["articles"]]}
                         for c in (competitors or [])],
     }
     return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
@@ -336,7 +339,8 @@ def load_work(raw: bytes) -> dict:
                          for r in w.get("releases", [])]
         w["meetings"] = [tuple(m) for m in w.get("meetings", [])]
         w["plans"] = [tuple(p) for p in w.get("plans", [])]
-        w["competitors"] = [{"name": c["name"], "articles": [{**a, "date": d(a.get("date"))} for a in c["articles"]]}
+        w["competitors"] = [{"name": c["name"], "category": c.get("category", ""),
+                             "articles": [{**a, "date": d(a.get("date"))} for a in c["articles"]]}
                             for c in w.get("competitors", [])]
         w["meta"]["year"], w["meta"]["month"] = int(w["meta"]["year"]), int(w["meta"]["month"])
     except Exception:
