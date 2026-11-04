@@ -34,7 +34,7 @@ from daily_collect_sheet import build_daily_sheet
 from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf
 from monthly_pdf import default_summary as monthly_summary, read_history as read_pdf_history
 from monthly_report import (
-    COMP_KINDS, KIND_OPTIONS, auto_group_mentions, auto_mark_releases, classify_competitor, competitor_summary, compose, guess_releases,
+    COMP_KINDS, KIND_OPTIONS, PORTAL_OPTIONS, article_portal, naver_portal, auto_group_mentions, auto_mark_releases, classify_competitor, competitor_summary, compose, guess_releases,
     history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
@@ -658,7 +658,8 @@ with tab2:
                     arts.append({
                         "url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": t,
                         "date": it["_dt"].date(), "kind": initial_kind(t, m_keyword, auto.get(id(it))),
-                        "include": True, "group": "", "naver": True,  # 09 경쟁사 비교는 네이버 기사만 셈
+                        "include": True, "group": "", "naver": True,  # 경쟁사 비교는 네이버 기사만 셈
+                        "portal": naver_portal(it.get("link")),
                     })
                 m_rels = guess_releases(arts, m_keyword)
                 n_rel = auto_mark_releases(arts, m_rels, m_keyword)  # 제목에 키워드 없는 우리 보도자료 기사
@@ -763,8 +764,9 @@ with tab2:
         art_df = st.data_editor(
             pd.DataFrame(
                 [{"포함": a["include"], "형식": a["kind"] or None, "묶음": a.get("group") or "",
-                  "매체": a["media"], "제목": a["title"], "게재일": a["date"], "URL": a["url"]} for a in M["articles"]],
-                columns=["포함", "형식", "묶음", "매체", "제목", "게재일", "URL"],
+                  "매체": a["media"], "제목": a["title"], "게재일": a["date"], "포털": article_portal(a), "URL": a["url"]}
+                 for a in M["articles"]],
+                columns=["포함", "형식", "묶음", "매체", "제목", "게재일", "포털", "URL"],
             ).astype({"묶음": "str", "매체": "str", "제목": "str"}),
             hide_index=True, width="stretch", height=min(38 + 35 * max(len(M["articles"]), 1), 560),
             disabled=["URL"], key=f"m_arts_{run}",
@@ -775,6 +777,7 @@ with tab2:
                 "매체": st.column_config.TextColumn("매체", width="small"),
                 "제목": st.column_config.TextColumn("제목", width="large"),
                 "게재일": st.column_config.DateColumn("게재일", format="MM-DD", width="small"),
+                "포털": st.column_config.SelectboxColumn("포털", options=PORTAL_OPTIONS, width="small", required=True),
                 "URL": st.column_config.LinkColumn("원문", display_text="열기", width="small"),
             },
         )
@@ -783,7 +786,9 @@ with tab2:
             text = lambda k, fb: fb if pd.isna(r[k]) else str(r[k]).strip()
             d = r["게재일"]
             articles.append({
-                "url": a["url"], "include": bool(r["포함"]), "naver": a.get("naver", True),
+                "url": a["url"], "include": bool(r["포함"]),
+                "portal": r["포털"] if r["포털"] in PORTAL_OPTIONS else article_portal(a),
+                "naver": (r["포털"] if r["포털"] in PORTAL_OPTIONS else article_portal(a)).startswith("네이버"),
                 "kind": "" if pd.isna(r["형식"]) or r["형식"] is None else str(r["형식"]),
                 "group": text("묶음", ""), "media": text("매체", a["media"]), "title": text("제목", a["title"]),
                 "date": d if isinstance(d, date) and not pd.isna(d) else a["date"],
@@ -795,7 +800,8 @@ with tab2:
         # ②-1 네이버에 없는 기사 (접지 않고 항상 보이게)
         st.markdown("##### ②-1 네이버에 없는 기사 추가")
         st.caption("다음·구글 등에서 찾은 기사 링크를 한 줄에 하나씩 붙여 넣고 버튼을 누르면 매체·제목·게재일을 읽어 위 표에 추가합니다. "
-                   "형식·단순언급 묶음도 같은 기준으로 자동으로 정리됩니다.")
+                   "형식·단순언급 묶음도 같은 기준으로 자동으로 정리됩니다. "
+                   "추가한 기사의 **포털**은 '구글'로 들어가니, 다음에서 찾은 기사는 위 표에서 '다음'으로 바꾸세요.")
         add_text = st.text_area("기사 링크 (한 줄에 하나씩)", key=f"m_add_urls_{run}", height=100,
                                 placeholder="https://www.example.co.kr/news/...")
         add_go = st.button("➕ 기사 정보 불러와서 추가", key=f"m_add_btn_{run}")
@@ -974,7 +980,7 @@ with tab2:
                     t_new = meta_a["제목"] or u
                     new.append({"url": meta_a["URL"], "media": meta_a["매체명"], "title": t_new, "date": pub,
                                 "kind": initial_kind(t_new, M.get("keyword") or M["company"], None),
-                                "include": True, "group": "", "naver": False})
+                                "include": True, "group": "", "naver": False, "portal": "구글"})
                     have.add(normalize_url(u))
             merged = articles + new
             # 새로 넣은 기사도 같은 기준으로: 우리 보도자료와 같은 소식이면 보도자료, 단순언급은 같은 소식끼리 묶음

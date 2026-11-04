@@ -505,57 +505,49 @@ def _draw_releases(doc, dates):
     doc.top = top - 8
 
 
+def _box_bars(p, x, top, w, h, rows, total_top):
+    """막대 상자 하나: rows [(이름, 건수)], 가장 큰 값만 파랑. 맨 아래(total_top)에 합계 줄."""
+    p.rect(x, top, w, h, fill=WHITE, stroke=LINE, r=8)
+    mx = max((n for _, n in rows), default=0) or 1
+    label_w = 72  # 세 상자 모두 같은 자리에서 막대가 시작하게
+    bx, bw = x + 12 + label_w, w - 24 - label_w - 36
+    t = top + 14
+    for name, n in rows:
+        col = FAINT if not n else INK
+        p.text(x + 12, t, name, font=MED, size=9, color=col)
+        p.rect(bx, t + 2.5, bw, 6, fill=BG, r=3)
+        if n:
+            p.rect(bx, t + 2.5, max(6, bw * n / mx), 6, fill=BLUE if n == mx else GRAY, r=3)
+        p.text(x + w - 12, t, f"{n}건", font=BOLD, size=9, color=col, align="right")
+        t += 20
+    p.hline(x + 12, total_top + 2, w - 24)
+    p.text(x + 12, total_top + 11, "합계", font=BOLD, size=9.5)
+    p.text(x + w - 12, total_top + 11, f"{sum(n for _, n in rows)}건", font=BOLD, size=9.5, align="right")
+
+
 def _draw_types_and_media(doc):
+    """03 기사 형식별 · 04 매체 유형별 · 05 포털 노출 구분을 한 줄에 같은 폭 세 칸으로."""
     p, d = doc.p, doc.data
     doc.top += 22
-    gap = 14
-    cw = (W - gap) / 2
+    gap = 10
+    cw = (W - gap * 2) / 3
     h = 170
-    doc.ensure(26 + h)
+    doc.ensure(26 + h + 16)
     top = doc.top
-    doc.section(3, "기사 형식별 보도 수", x=X0, w=cw)
     box = top + 26
-    # 형식별 막대
-    p.rect(X0, box, cw, h, fill=WHITE, stroke=LINE, r=8)
+    total_top = box + 14 + 20 * len(TYPES_SHOWN)  # 세 상자 합계 줄 높이를 맞춤
+    xs = [X0 + i * (cw + gap) for i in range(3)]
+    for i, title in enumerate(["기사 형식별 보도 수", "매체 유형별 보도 수", "포털 노출 구분"]):
+        nx = p.text(xs[i], top + 2, f"{i + 3:02d}", font=BOLD, size=11, color=BLUE)
+        p.text(nx + 6, top, title, font=BOLD, size=12.5)
     types = d["types"]
-    mx = max(types.values()) or 1
-    t = box + 14
-    for name in TYPES_SHOWN:
-        n = types.get(name, 0)
-        col = FAINT if not n else INK
-        p.text(X0 + 14, t, name, font=MED, size=9.5, color=col)
-        bx, bw = X0 + 92, cw - 92 - 50
-        p.rect(bx, t + 2.5, bw, 7, fill=BG, r=3.5)
-        if n:
-            p.rect(bx, t + 2.5, max(7, bw * n / mx), 7, fill=BLUE if n == mx else GRAY, r=3.5)
-        p.text(X0 + cw - 14, t, f"{n}건", font=BOLD, size=9.5, color=col, align="right")
-        t += 20
-    p.hline(X0 + 14, t + 2, cw - 28)
-    p.text(X0 + 14, t + 11, "합계", font=BOLD, size=10)
-    p.text(X0 + cw - 14, t + 11, f"{sum(types.values())}건", font=BOLD, size=10, align="right")
-
-    # 04 매체 유형별 보도 수 (이번 달 실린 기사 전체, 단순언급 포함)
-    x0 = X0 + cw + gap
-    doc.section(4, "매체 유형별 보도 수", x=x0, w=cw)
-    p.rect(x0, box, cw, h, fill=WHITE, stroke=LINE, r=8)
-    cats = d.get("media_types") or []
-    if not cats:
-        p.text(x0 + 14, box + 16, "이번 달 실린 기사가 없습니다.", size=9, color=MUTED)
-    mx = max((n for _, n in cats), default=0) or 1
-    t = box + 14
-    for name, n in cats:
-        p.text(x0 + 14, t, name, font=MED, size=9.5)
-        bx, bw = x0 + 92, cw - 92 - 50
-        p.rect(bx, t + 2.5, bw, 7, fill=BG, r=3.5)
-        p.rect(bx, t + 2.5, max(7, bw * n / mx), 7, fill=BLUE if n == mx else GRAY, r=3.5)
-        p.text(x0 + cw - 14, t, f"{n}건", font=BOLD, size=9.5, align="right")
-        t += 20
-    if cats:  # 03 과 같은 합계 줄 (03 합계와 같은 높이에)
-        t = box + 14 + 20 * len(TYPES_SHOWN)
-        p.hline(x0 + 14, t + 2, cw - 28)
-        p.text(x0 + 14, t + 11, "합계", font=BOLD, size=10)
-        p.text(x0 + cw - 14, t + 11, f"{sum(n for _, n in cats)}건", font=BOLD, size=10, align="right")
-    doc.top = box + h
+    _box_bars(p, xs[0], box, cw, h, [(n, types.get(n, 0)) for n in TYPES_SHOWN], total_top)
+    _box_bars(p, xs[1], box, cw, h, d.get("media_types") or [], total_top)
+    portals = d.get("portals") or []
+    _box_bars(p, xs[2], box, cw, h, portals, total_top)
+    if portals:
+        p.text(xs[2] + cw - 2, box + h + 6, "※ 네이버 게재 기사의 경우 다음·구글 집계에서 제외", size=7.8, color=MUTED, align="right")
+    doc.top = box + h + 16
 
 
 SOFT_BLUE = HexColor("#F2F5FD")
@@ -693,7 +685,7 @@ def _draw_meetings_and_plans(doc):
     start = doc.top
     page = doc.page_no
 
-    doc.section(5, "기자 미팅", x=X0, w=cw)
+    doc.section(6, "기자 미팅", x=X0, w=cw)
     doc.top = start + 26
     if d["meetings"]:
         rows = [{"cells": [(a, REG, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["meetings"]]
@@ -711,7 +703,7 @@ def _draw_meetings_and_plans(doc):
     else:
         x, w, start2 = X0 + cw + gap, cw, start
     doc.top = start2
-    doc.section(6, d["plan_title"], x=x, w=w)
+    doc.section(7, d["plan_title"], x=x, w=w)
     doc.top = start2 + 26
     if d["plans"]:
         rows = [{"cells": [(a, REG, INK), (b, REG, INK), (c, REG, INK)]} for a, b, c in d["plans"]]
@@ -725,7 +717,7 @@ def _draw_meetings_and_plans(doc):
 def _draw_articles(doc, dates):
     """기사 전체를 게재일·매체 순으로 한 표에 (보도자료별 묶음 줄 없이)"""
     arts = doc.data["articles"]
-    doc.section(7, "주요 기사", "제목을 누르면 기사로 이동")
+    doc.section(8, "주요 기사", "제목을 누르면 기사로 이동")
     doc.top += 26
     rows = []
     for no, a in enumerate(arts, 1):
@@ -746,7 +738,7 @@ def _draw_mentions(doc):
     ms = d["mentions"]
     doc.top += 24
     doc.ensure(26 + 22 + 30)
-    doc.section(8, "단순 언급 기사")
+    doc.section(9, "단순 언급 기사")
     doc.top += 26
     if not ms:
         doc.p.text(X0, doc.top, "이번 달 단순 언급 기사가 없습니다.", size=9.5, color=MUTED)
@@ -777,11 +769,11 @@ def read_history(pdf_bytes):
 
 
 def _draw_competitors(doc):
-    """09 경쟁사 비교: 형식별 건수 표(우리 회사 줄은 굵게) + 경쟁사 보도자료 목록(제목 누르면 대표 기사)."""
+    """10 경쟁사 비교: 형식별 건수 표(우리 회사 줄은 굵게) + 경쟁사 보도자료 목록(제목 누르면 대표 기사)."""
     p, rows = doc.p, doc.data["competitors"]
     doc.top += 24
     doc.ensure(26 + 22 + 30 * len(rows) + 60)
-    doc.section(9, "경쟁사 비교", "네이버 뉴스 기준")
+    doc.section(10, "경쟁사 비교", "네이버 뉴스 기준")
     doc.top += 26
     has_cat = any(r.get("category") for r in rows)  # 분류를 하나라도 넣었으면 맨 왼쪽에 분류 칸
     trs = []

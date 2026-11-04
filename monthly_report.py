@@ -184,6 +184,7 @@ def compose(meta, articles, releases, meetings, plans, trend_rows, competitors=N
             "meetings": [x for x in meetings if any(x)], "plans": [p for p in plans if any(p)],
             "plan_title": f"{m % 12 + 1}월 PR 목표", "trend": trend, "has_past": has_past,
             "media_types": _media_types(used),
+            "portals": [(k, sum(1 for a in used if article_portal(a) == k)) for k in PORTAL_OPTIONS],
             "competitors": _competitor_rows(meta["company"], used, rels, competitors) if competitors else None,
             "history": {"company": meta["company"], "year": meta["year"], "month": m, "rows": rows,
                         "detail": month_detail(main, rels, dates, [x for x in meetings if any(x)])}}
@@ -193,6 +194,18 @@ def compose(meta, articles, releases, meetings, plans, trend_rows, competitors=N
 # ---------------------------------------------------------------- 경쟁사 비교 (PDF 09)
 
 COMP_KINDS = ["보도자료", "기획·인터뷰", "주가·시황", "단순언급"]
+# 포털 노출 구분 (PDF 05). 네이버에 실린 기사는 다음·구글에도 있어도 네이버로만 셈
+PORTAL_OPTIONS = ["네이버 CP", "네이버 검색제휴", "다음", "구글"]
+
+
+def naver_portal(link):
+    """네이버 검색 결과의 link 가 n.news.naver.com 이면 네이버 CP(네이버 뉴스 제휴), 아니면 검색제휴."""
+    return "네이버 CP" if "n.news.naver.com" in (link or "") else "네이버 검색제휴"
+
+
+def article_portal(a):
+    """기사 포털: 저장된 값, 없으면 네이버로 모은 기사는 검색제휴·직접 넣은 기사는 구글로 봄 (예전 작업 파일)."""
+    return a.get("portal") or ("네이버 검색제휴" if a.get("naver", True) else "구글")
 # 종목 나열·시세 기사 제목에 자주 나오는 말 (경쟁사 기사 자동 분류용)
 STOCK_WORDS = re.compile(r"주[가식]|테마주|관련주|[가-힣]+주에|[가-힣]+주|株|매수|순매도|상승|하락|급등|급락|강세|약세|시황|"
                          r"코스피|코스닥|랠리|희비|트래커|DAT|상폐|청산|비트코인|가상자산|가상화폐|코인|실적")
