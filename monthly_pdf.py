@@ -34,10 +34,12 @@ FAINT = HexColor("#9AA1AE")
 BOTTOM_Y = PAGE_H - 46
 PURPLE = HexColor("#7A4FD1")
 # 월별 추이 막대: 아래에서부터 쌓는 순서 (키, 범례 이름, 색)
-TREND_SERIES = [("release", "보도자료", BLUE), ("plan", "기획", GREEN), ("interview", "인터뷰", PURPLE),
-                ("contrib", "기고", ORANGE), ("mention", "단순언급", GRAY)]  # 본문이 내려올 수 있는 한계 (아래는 꼬리말)
+LIGHT_GREEN = HexColor("#93D3B4")
+TREND_SERIES = [("release", "보도자료", BLUE), ("plan_op", "기획(오픈피알)", GREEN), ("interview", "인터뷰", PURPLE),
+                ("contrib", "기고", ORANGE), ("plan_ext", "기획(외부)", LIGHT_GREEN), ("mention", "단순언급", GRAY)]  # 본문이 내려올 수 있는 한계 (아래는 꼬리말)
 
 TYPE_ORDER = ["인터뷰", "기고", "기획(오픈피알)", "기획(외부)", "보도자료", "단순언급"]
+TYPES_SHOWN = ["인터뷰", "기고", "기획(오픈피알)", "보도자료", "기획(외부)", "단순언급"]  # 03 막대 순서: 외부(기획 외부·단순언급)는 아래로
 SECTION_KEYS = {  # 구역 제목에 들어 있는 말 -> 구역 이름 (위에서부터 먼저 맞는 것; '단순 언급 주요 기사'라서 단순 언급이 먼저)
     "types": "기사형식별", "releases": "보도자료별", "mentions": "단순 언급",
     "articles": "주요 기사", "meetings": "기자 미팅", "plans": "목표",
@@ -195,6 +197,8 @@ def trend_from_rows(rows):
         "interview": list(rows["인터뷰"]),
         "contrib": list(rows["기고"]),
         "plan": [rows["기획(오픈피알)"][i] + rows["기획(외부)"][i] for i in range(12)],
+        "plan_op": list(rows["기획(오픈피알)"]),
+        "plan_ext": list(rows["기획(외부)"]),
     }
 
 
@@ -516,7 +520,7 @@ def _draw_types_and_media(doc):
     types = d["types"]
     mx = max(types.values()) or 1
     t = box + 14
-    for name in TYPE_ORDER:
+    for name in TYPES_SHOWN:
         n = types.get(name, 0)
         col = FAINT if not n else INK
         p.text(X0 + 14, t, name, font=MED, size=9.5, color=col)
@@ -547,20 +551,19 @@ def _draw_types_and_media(doc):
         p.text(x0 + cw - 14, t, f"{n}건", font=BOLD, size=9.5, align="right")
         t += 20
     if cats:  # 03 과 같은 합계 줄 (03 합계와 같은 높이에)
-        t = box + 14 + 20 * len(TYPE_ORDER)
+        t = box + 14 + 20 * len(TYPES_SHOWN)
         p.hline(x0 + 14, t + 2, cw - 28)
         p.text(x0 + 14, t + 11, "합계", font=BOLD, size=10)
         p.text(x0 + cw - 14, t + 11, f"{sum(n for _, n in cats)}건", font=BOLD, size=10, align="right")
-    # 03 상자 아래 오른쪽에 기획(오픈피알) 뜻 한 줄
-    p.text(X0 + cw - 2, box + h + 6, "※ 기획(오픈피알) - 오픈피알 피칭·컨택 후 작성된 기획 기사", size=7.8, color=MUTED, align="right")
-    doc.top = box + h + 16
+    doc.top = box + h
 
 
 SOFT_BLUE = HexColor("#F2F5FD")
 
 
-# 02 표 묶음: (구분, 형식 키들, 소계 이름) - 기획(외부)도 '기획'이라 오픈PR 에 들어감
-TREND_GROUPS = [("오픈PR", ["release", "plan", "interview", "contrib"], "오픈 PR 합계"), ("외부", ["mention"], "외부 PR 합계")]
+# 02 표 묶음: (구분, 형식 키들, 소계 이름) - 기획(외부)는 오픈피알 피칭이 아니라서 외부
+TREND_GROUPS = [("오픈PR", ["release", "plan_op", "interview", "contrib"], "오픈 PR 합계"),
+                ("외부", ["plan_ext", "mention"], "외부 PR 합계")]
 
 
 def _draw_trend(doc):
@@ -582,7 +585,7 @@ def _draw_trend(doc):
     bt = top + 26
     p.rect(X0, bt, W, box_h, fill=WHITE, stroke=LINE, r=8)
     ix, iw = X0 + 12, W - 24
-    glw, lbl = 40, 96  # 구분 칸, 구분+형식 칸 폭
+    glw, lbl = 40, 112  # 구분 칸, 구분+형식 칸 폭 ('기획(오픈피알)'이 들어가게)
     slot = (iw - lbl - 34) / 12
     cx = lambda i: ix + lbl + slot * i + slot / 2
     base = bt + pad + chart_h
@@ -637,7 +640,9 @@ def _draw_trend(doc):
         p.hline(ix, t, iw)
     p.hline(ix, t, iw, color=INK, lw=0.8)
     row("합계", tot, ix, always=True)
-    doc.top = bt + box_h
+    # 02 상자 아래 오른쪽에 기획(오픈피알) 뜻 한 줄
+    p.text(X0 + W - 2, bt + box_h + 6, "※ 기획(오픈피알) - 오픈피알 피칭·컨택 후 작성된 기획 기사", size=7.8, color=MUTED, align="right")
+    doc.top = bt + box_h + 16
 
 
 def _table(doc, cols, rows, x=X0, w=W, font_size=9, lead=13):
