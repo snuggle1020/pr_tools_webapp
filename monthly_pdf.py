@@ -526,7 +526,7 @@ def _box_bars(p, x, top, w, h, rows, total_top):
 
 
 def _draw_types_and_media(doc):
-    """03 기사 형식별 · 04 매체 유형별 · 05 포털 노출 구분을 한 줄에 같은 폭 세 칸으로."""
+    """03 기사 형식별 · 04 매체 유형별 · 05 포털별 게재 수를 한 줄에 같은 폭 세 칸으로."""
     p, d = doc.p, doc.data
     doc.top += 22
     gap = 10
@@ -537,7 +537,7 @@ def _draw_types_and_media(doc):
     box = top + 26
     total_top = box + 14 + 20 * len(TYPES_SHOWN)  # 세 상자 합계 줄 높이를 맞춤
     xs = [X0 + i * (cw + gap) for i in range(3)]
-    for i, title in enumerate(["기사 형식별 보도 수", "매체 유형별 보도 수", "포털 노출 구분"]):
+    for i, title in enumerate(["기사 형식별 보도 수", "매체 유형별 보도 수", "포털별 게재 수"]):
         nx = p.text(xs[i], top + 2, f"{i + 3:02d}", font=BOLD, size=11, color=BLUE)
         p.text(nx + 6, top, title, font=BOLD, size=12.5)
     types = d["types"]
