@@ -33,10 +33,10 @@ RED = HexColor("#C2410C")
 FAINT = HexColor("#9AA1AE")
 BOTTOM_Y = PAGE_H - 46
 PURPLE = HexColor("#7A4FD1")
-# 월별 추이 막대: 아래에서부터 쌓는 순서 (키, 범례 이름, 색)
+# 월별 추이 막대: 아래에서부터 쌓는 순서 (키, 표에 쓰는 이름, 색) - 기획은 표에서 구분(오픈피알/외부)으로 나뉨
 LIGHT_GREEN = HexColor("#93D3B4")
-TREND_SERIES = [("release", "보도자료", BLUE), ("plan_op", "기획(오픈피알)", GREEN), ("interview", "인터뷰", PURPLE),
-                ("contrib", "기고", ORANGE), ("plan_ext", "기획(외부)", LIGHT_GREEN), ("mention", "단순언급", GRAY)]  # 본문이 내려올 수 있는 한계 (아래는 꼬리말)
+TREND_SERIES = [("release", "보도자료", BLUE), ("plan_op", "기획", GREEN), ("interview", "인터뷰", PURPLE),
+                ("contrib", "기고", ORANGE), ("plan_ext", "기획", LIGHT_GREEN), ("mention", "단순언급", GRAY)]  # 본문이 내려올 수 있는 한계 (아래는 꼬리말)
 
 TYPE_ORDER = ["인터뷰", "기고", "기획(오픈피알)", "기획(외부)", "보도자료", "단순언급"]
 TYPES_SHOWN = ["인터뷰", "기고", "기획(오픈피알)", "보도자료", "기획(외부)", "단순언급"]  # 03 막대 순서: 외부(기획 외부·단순언급)는 아래로
@@ -562,8 +562,8 @@ SOFT_BLUE = HexColor("#F2F5FD")
 
 
 # 02 표 묶음: (구분, 형식 키들, 소계 이름) - 기획(외부)는 오픈피알 피칭이 아니라서 외부
-TREND_GROUPS = [("오픈PR", ["release", "plan_op", "interview", "contrib"], "오픈 PR 합계"),
-                ("외부", ["plan_ext", "mention"], "외부 PR 합계")]
+TREND_GROUPS = [("오픈피알", ["release", "plan_op", "interview", "contrib"], "합계"),
+                ("외부", ["plan_ext", "mention"], "합계")]
 
 
 def _draw_trend(doc):
@@ -585,7 +585,7 @@ def _draw_trend(doc):
     bt = top + 26
     p.rect(X0, bt, W, box_h, fill=WHITE, stroke=LINE, r=8)
     ix, iw = X0 + 12, W - 24
-    glw, lbl = 40, 112  # 구분 칸, 구분+형식 칸 폭 ('기획(오픈피알)'이 들어가게)
+    glw, lbl = 48, 112  # 구분 칸('오픈피알'), 구분+형식 칸 폭
     slot = (iw - lbl - 34) / 12
     cx = lambda i: ix + lbl + slot * i + slot / 2
     base = bt + pad + chart_h
