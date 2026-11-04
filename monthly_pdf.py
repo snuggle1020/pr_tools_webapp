@@ -790,8 +790,8 @@ def _draw_competitors(doc):
         rel = (f"{r['rel_articles']}건 ({r['n_rel']}건)" if r["rel_articles"] else "–", f, INK if r["rel_articles"] else MUTED)
         trs.append({"cells": [(r["name"], f, INK), rel, num(r["plan"]), num(r["stock"]), num(r["mention"]),
                               (f"{r['total']}건", f, INK)]})
-    cw = (W - 110) / 5  # 기업 칸 뒤 다섯 칸은 같은 폭
-    _table(doc, [("기업", 110, "left"), ("보도자료 (배포 건수)", cw, "center"), ("기획·인터뷰", cw, "center"),
+    cw = (W - 80 - 110) / 4  # 기업 80, 보도자료(글이 길어서) 110, 나머지 네 칸은 같은 폭
+    _table(doc, [("기업", 80, "left"), ("보도자료 (배포 건수)", 110, "center"), ("기획·인터뷰", cw, "center"),
                  ("주가·시황", cw, "center"), ("단순언급", cw, "center"), ("총 게재 수", cw, "center")], trs)
     rl = [{"cells": [(r["name"], REG, INK), (x["title"], REG, INK),
                      (f"{x['date'].month}.{x['date'].day}" if x["date"] else "", REG, MUTED), (f"{x['count']}건", REG, INK)],
