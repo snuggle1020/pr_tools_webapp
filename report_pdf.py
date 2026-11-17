@@ -558,6 +558,7 @@ CMP_TOPIC_W = 250  # 주제 칸 폭
 CMP_SIZE = 8.8
 CMP_ROW_H = 25
 CMP_LINE_H = 13
+CMP_ROW_H2 = 34  # 두 줄짜리 주제가 있을 때 한 줄 높이
 
 
 def auto_topic(title, company):
@@ -581,8 +582,10 @@ def auto_topic(title, company):
 def _comparison_layout(cmp):
     pad = 15
     rows = [dict(r, lines=_wrap(r["topic"], MED, CMP_SIZE, CMP_TOPIC_W)[:2]) for r in cmp["rows"]]
+    # 줄 간격을 모두 같게: 두 줄짜리 주제가 하나라도 있으면 모든 줄을 그 높이로 맞춤
+    row_h = CMP_ROW_H2 if any(len(r["lines"]) > 1 for r in rows) else CMP_ROW_H
     for r in rows:
-        r["h"] = CMP_ROW_H + CMP_LINE_H * (len(r["lines"]) - 1)
+        r["h"] = row_h
     chip_lines = (1 if cmp["first_media"] else 0) + (1 if cmp["regular_media"] else 0)
     gap = 16
     h = 94 + gap + sum(r["h"] for r in rows) + (4 + gap + 19 * chip_lines - 4 if chip_lines else 0) + 14
@@ -631,8 +634,9 @@ def _draw_comparison(p, top, cmp):
     vmax = max([r["total"] for r in rows] + [1])
     for r in rows:
         now = r.get("now")
-        row_t, t = t, t + (CMP_ROW_H - 19) / 2  # 넓힌 만큼 위아래 여백을 똑같이
-        mid = t + (len(r["lines"]) - 1) * CMP_LINE_H / 2  # 두 줄이면 날짜·막대·건수를 두 줄 가운데에
+        extra = CMP_LINE_H * (len(r["lines"]) - 1)
+        row_t, t = t, t + (r["h"] - 19 - extra) / 2  # 줄 높이 안에서 위아래 가운데
+        mid = t + extra / 2  # 두 줄이면 날짜·막대·건수를 두 줄 가운데에
         if now:
             p.rect(X0 + pad - 6, row_t - 4.5, W - 2 * pad + 12, r["h"] - 2, fill=CMP_NOW_BG, r=5)
         p.text(X0 + pad, mid, f"{r['date']:%m.%d} ({WEEKDAYS[r['date'].weekday()]})", size=CMP_SIZE, color=BLUE if now else MUTED, font=SEMI if now else REG)
