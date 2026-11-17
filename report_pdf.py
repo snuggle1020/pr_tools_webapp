@@ -625,7 +625,7 @@ def _draw_comparison(p, top, cmp):
     t = top + 94
     p.hline(X0 + pad, t, W - 2 * pad)
     t += gap
-    date_w, num_w = 44, 34
+    date_w, num_w = 54, 34
     bar_x = X0 + pad + date_w + CMP_TOPIC_W + 10
     bar_w = X0 + W - pad - num_w - bar_x
     vmax = max([r["total"] for r in rows] + [1])
@@ -635,7 +635,7 @@ def _draw_comparison(p, top, cmp):
         mid = t + (len(r["lines"]) - 1) * CMP_LINE_H / 2  # 두 줄이면 날짜·막대·건수를 두 줄 가운데에
         if now:
             p.rect(X0 + pad - 6, row_t - 4.5, W - 2 * pad + 12, r["h"] - 2, fill=CMP_NOW_BG, r=5)
-        p.text(X0 + pad, mid, f"{r['date']:%m.%d}", size=CMP_SIZE, color=BLUE if now else MUTED, font=SEMI if now else REG)
+        p.text(X0 + pad, mid, f"{r['date']:%m.%d} ({WEEKDAYS[r['date'].weekday()]})", size=CMP_SIZE, color=BLUE if now else MUTED, font=SEMI if now else REG)
         for k, line in enumerate(r["lines"]):
             p.text(X0 + pad + date_w, t + k * CMP_LINE_H, line, font=SEMI if now else MED, size=CMP_SIZE,
                    color=BLUE if now else INK)
