@@ -1551,19 +1551,19 @@
   "딥파인": [
    {
     "name": "버넥트",
-    "category": ""
+    "category": "DAO"
    },
    {
     "name": "비트맥스",
-    "category": ""
+    "category": "DAO,DSC"
    },
    {
     "name": "리얼패킹",
-    "category": ""
+    "category": "LOGI.FINE"
    },
    {
     "name": "테크타카",
-    "category": ""
+    "category": "LOGI.FINE"
    }
   ]
  }
