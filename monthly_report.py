@@ -191,6 +191,122 @@ def compose(meta, articles, releases, meetings, plans, trend_rows, competitors=N
     return data, dates, blank
 
 
+# ---------------------------------------------------------------- 보도자료 결과보고서 PDF 읽기
+
+_RESULT_COLS = ["No", "매체명", "제목", "매체 유형", "기사 유형", "게재일", "게재 포털"]
+
+
+def read_result_report(pdf_bytes):
+    """이 앱의 '보도자료 결과보고서' PDF -> {'title','date', 'articles': [{'media','title','url','date','portals'(set),'single'}]}.
+    1쪽의 '보도자료 제목'·'배포일'과, '게재 기사 전체' 표(No·매체명·제목·…·게재 포털, 제목에 원문 링크)를 글자 위치로 읽는다.
+    표가 아니면 ValueError."""
+    import pymupdf
+
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    lines = [ln.strip() for ln in doc[0].get_text().splitlines() if ln.strip()]
+    try:
+        title = lines[lines.index("보도자료 제목") + 1]
+        m = re.match(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", lines[lines.index("배포일") + 1])
+        dist = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except (ValueError, IndexError, AttributeError):
+        raise ValueError("보도자료 결과보고서 PDF가 아닙니다 (1쪽에 '보도자료 제목'·'배포일'이 없음).")
+
+    articles = []
+    for page in doc:
+        spans = [(s["bbox"][0], (s["bbox"][1] + s["bbox"][3]) / 2, s["text"].strip())
+                 for b in page.get_text("dict")["blocks"] for l in b.get("lines", []) for s in l["spans"] if s["text"].strip()]
+        head = {t: (x, y) for x, y, t in spans if t in _RESULT_COLS}
+        if len(head) < len(_RESULT_COLS):
+            continue  # 기사 표가 없는 쪽
+        head_y = max(y for _, y in head.values())
+        xs = sorted((x, name) for name, (x, _) in head.items())
+        col_of = lambda x: [name for cx, name in xs if cx <= x + 3][-1]
+        body = [(x, y, t) for x, y, t in spans if y > head_y + 4 and not t.startswith(("본 보고서는", "Prepared by"))]
+        anchors = sorted((y, int(t)) for x, y, t in body if col_of(x) == "No" and t.isdigit())
+        if not anchors:
+            continue
+        rows = {no: {c: [] for c in _RESULT_COLS} for _, no in anchors}
+        # 같은 줄(세로 3pt 안)끼리는 왼쪽부터 - 한자 등 다른 글꼴은 높이가 조금 달라서 y 만으로 정렬하면 순서가 섞임
+        line_y = {}
+        for x, y, t in sorted(body, key=lambda s: s[1]):
+            line_y[(x, y, t)] = next((ly for ly in line_y.values() if abs(ly - y) < 3), y)
+        for x, y, t in sorted(body, key=lambda s: (line_y[s], s[0])):
+            ay, no = min(anchors, key=lambda a: abs(a[0] - y))
+            if abs(ay - y) < 60:  # 여러 줄로 길게 내려간 제목도 같은 행으로
+                rows[no][col_of(x)].append(t)
+        links = [(l["from"].y0 + l["from"].y1) / 2 for l in page.get_links() if l.get("uri")]
+        uris = [l["uri"] for l in page.get_links() if l.get("uri")]
+        for ay, no in anchors:
+            r = rows[no]
+            md = re.match(r"(\d{1,2})\.(\d{1,2})", " ".join(r["게재일"]))
+            if not md:
+                continue
+            mo, dy = int(md.group(1)), int(md.group(2))
+            year = dist.year + (1 if mo < dist.month - 6 else 0)  # 12월 배포 -> 1월 게재
+            near = [(abs(ly - ay), u) for ly, u in zip(links, uris)]
+            url = min(near)[1] if near and min(near)[0] < 20 else ""
+            media = re.sub(r"^(Daum|Google|다음|구글)\s*\|\s*", "", " ".join(r["매체명"])).strip()
+            articles.append({
+                "media": media, "title": " ".join(r["제목"]).replace("  ", " ").strip(), "url": url,
+                "date": date(year, mo, dy),
+                "portals": {p for p in re.split(r"[/·,\s]+", " ".join(r["게재 포털"])) if p in ("네이버", "다음", "구글")},
+                "single": "묶음" not in " ".join(r["기사 유형"]),
+            })
+    if not articles:
+        raise ValueError("결과보고서 PDF에서 '게재 기사 전체' 표를 찾지 못했습니다.")
+    return {"title": title, "date": dist, "articles": articles}
+
+
+def merge_result_reports(articles, releases, reports, year, month, keyword):
+    """결과보고서 PDF 내용을 월간 작업에 합친다 (articles·releases 를 바로 고침).
+    - 보도자료: 배포일이 하루 안으로 같은 보도자료가 있으면 제목·배포일을 결과보고서 것으로, 없으면 추가
+    - 기사: 이 달 기사만. 이미 있는 기사(주소 또는 같은 매체·비슷한 제목)는 형식을 보도자료로,
+      없는 기사(주로 다음·구글)는 결과보고서의 게재 포털을 붙여 추가
+    - 마지막으로 결과보고서 뒤에 늦게 실린 같은 소식 기사도 보도자료로 (auto_mark_releases)
+    반환: (추가한 기사 수, 보도자료로 맞춘 기사 수, 늦게 실린 보도자료 기사 수)."""
+    from article_meta import normalize_url
+
+    by_url = {normalize_url(a["url"]): a for a in articles if a.get("url")}
+
+    def find(x):
+        a = by_url.get(normalize_url(x["url"])) if x["url"] else None
+        if a:
+            return a
+        bx = _bigrams(x["title"], keyword)
+        return next((a for a in articles if a["media"] == x["media"] and bx
+                     and len(bx & _bigrams(a["title"], keyword)) >= 0.6 * len(bx)), None)
+
+    added = matched = 0
+    for rep in reports:
+        same = next((r for r in releases if r.get("date") and abs((r["date"] - rep["date"]).days) <= 1), None)
+        if same:
+            same.update(title=rep["title"], date=rep["date"])
+        else:
+            releases.append({"title": rep["title"], "date": rep["date"], "deleted": False, "count": 0})
+        for x in rep["articles"]:
+            if (x["date"].year, x["date"].month) != (year, month):
+                continue  # 다른 달에 실린 기사는 그 달 리포트에서
+            on_naver = "네이버" in x["portals"]
+            other = "다음" if "다음" in x["portals"] else "구글"
+            a = find(x)
+            if a:
+                a.update(kind="보도자료", group="", include=True)
+                if not on_naver and not a.get("naver", True):
+                    a["portal"] = other
+                matched += 1
+            else:
+                a = {"url": x["url"], "media": x["media"], "title": x["title"], "date": x["date"], "kind": "보도자료",
+                     "include": True, "group": "", "naver": on_naver,
+                     "portal": "네이버 검색제휴" if on_naver else other}
+                articles.append(a)
+                if x["url"]:
+                    by_url[normalize_url(x["url"])] = a
+                added += 1
+    releases.sort(key=lambda r: r["date"] or date.max)
+    late = auto_mark_releases(articles, releases, keyword)
+    return added, matched, late
+
+
 # ---------------------------------------------------------------- 경쟁사 비교 (PDF 09)
 
 COMP_KINDS = ["보도자료", "기획·인터뷰", "주가·시황", "단순언급"]

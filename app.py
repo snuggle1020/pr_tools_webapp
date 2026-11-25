@@ -34,7 +34,7 @@ from daily_collect_sheet import build_daily_sheet
 from monthly_pdf import TYPE_ORDER, assign_release, build_monthly_pdf
 from monthly_pdf import default_summary as monthly_summary, read_history as read_pdf_history
 from monthly_report import (
-    COMP_KINDS, KIND_OPTIONS, PORTAL_OPTIONS, article_portal, naver_portal, auto_group_mentions, auto_mark_releases, classify_competitor, competitor_summary, compose, guess_releases,
+    COMP_KINDS, KIND_OPTIONS, PORTAL_OPTIONS, article_portal, merge_result_reports, naver_portal, read_result_report, auto_group_mentions, auto_mark_releases, classify_competitor, competitor_summary, compose, guess_releases,
     history_from_secrets, initial_kind, sort_articles, trend_rows_from_xlsx,
     dump_work as dump_month_work, load_work as load_month_work,
 )
@@ -720,6 +720,14 @@ with tab2:
 
         # ① 보도자료
         st.markdown("##### ① 이번 달 배포한 보도자료")
+        res_files = st.file_uploader(
+            "보도자료 결과보고서 PDF 올리기 (이 앱에서 만든 결과보고서, 여러 개 가능) · 보도자료 제목·배포일과 게재 기사(다음·구글 포함)를 "
+            "그대로 가져와 아래 ①·② 에 채웁니다. 결과보고서 뒤에 늦게 실린 같은 소식 기사도 보도자료로 셉니다.",
+            type=["pdf"], accept_multiple_files=True, key=f"m_resrep_{st.session_state.get('m_cid', 0)}")
+        res_new = [f for f in (res_files or []) if f.file_id not in st.session_state.setdefault("m_res_applied", set())]
+        res_msg = st.session_state.pop("m_res_msg", None)
+        if res_msg:
+            getattr(st, res_msg[0])(res_msg[1])
         st.caption("보도자료 기사가 몰린 날짜로 미리 채웠습니다. 제목·배포일을 확인하고 고치세요. 빠진 건은 추가, 틀린 건은 삭제하세요. "
                    "형식이 '보도자료'인 기사는 배포일 기준으로 각 보도자료에 자동으로 묶입니다. "
                    "기사가 실렸다가 삭제 요청한 보도자료는 **게재 후 삭제**에 체크하고, 삭제 전 실렸던 기사 수를 **게재 건수**에 넣으세요 "
@@ -935,6 +943,31 @@ with tab2:
                      summary=summary_text, company=meta["company"], trend_rows=trend_input)
             st.session_state["m_run"] = run + 1
             st.rerun()
+
+        if res_new:  # 결과보고서 PDF: 고친 내용은 그대로 두고 보도자료·기사만 채워서 다시 그림
+            reports, errs = [], []
+            for f in res_new:
+                st.session_state["m_res_applied"].add(f.file_id)
+                try:
+                    reports.append(read_result_report(f.getvalue()))
+                except Exception as e:
+                    errs.append(f"{f.name}: {e}")
+            if reports:
+                added, matched, late = merge_result_reports(articles, releases, reports, M["year"], M["month"],
+                                                            M.get("keyword") or M["company"])
+                auto_group_mentions(articles)
+                M.update(articles=sort_articles(articles), releases=releases, meetings=meetings, plans=plans,
+                         summary=summary_text, company=meta["company"], trend_rows=trend_input)
+                st.session_state["m_res_msg"] = (
+                    "warning" if errs else "success",
+                    f"결과보고서 {len(reports)}개를 반영했습니다: 보도자료 {', '.join(r['date'].strftime('%m/%d') for r in reports)} · "
+                    f"기사 {matched}건 보도자료로 지정, {added}건 추가(다음·구글 등)"
+                    + (f", 늦게 실린 같은 소식 {late}건도 보도자료로" if late else "")
+                    + (" / 읽지 못한 파일: " + " / ".join(errs) if errs else ""))
+                st.session_state["m_run"] = run + 1
+                st.rerun()
+            else:
+                st.error("결과보고서 PDF를 읽지 못했습니다: " + " / ".join(errs))
 
         if comp_go:  # 고친 내용은 그대로 두고 경쟁사 기사만 새로 모음
             new_c, errs = [], []
