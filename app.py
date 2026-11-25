@@ -686,8 +686,14 @@ with tab2:
                 h = read_pdf_history(raw)
                 year, rows = (h["year"], h["rows"]) if h else (None, None)
                 if not h:
-                    msg = ("warning", "이 PDF에는 월별 기록이 없습니다 (이 앱으로 만든 PDF가 아님). "
-                                      "아래 ⑤ 월별 건수 표에 직접 넣거나 기존 PR리포트 엑셀을 한 번 올려주세요.")
+                    try:  # 결과보고서 PDF를 이 칸에 올린 경우: 아래 ① 결과보고서 칸에 올린 것처럼 반영
+                        read_result_report(raw)
+                        st.session_state.setdefault("m_res_pending", []).append(m_prev)
+                        msg = ("info", f"'{m_prev.name}'은 보도자료 결과보고서라 ① 보도자료·기사에 반영합니다. "
+                                       "결과보고서는 ① 위 '결과보고서 PDF 올리기' 칸에 올려도 됩니다.")
+                    except Exception:
+                        msg = ("warning", "이 PDF에는 월별 기록이 없습니다 (이 앱으로 만든 PDF가 아님). "
+                                          "아래 ⑤ 월별 건수 표에 직접 넣거나 기존 PR리포트 엑셀을 한 번 올려주세요.")
             else:
                 year, rows = trend_rows_from_xlsx(raw)
                 if not rows:
@@ -724,7 +730,8 @@ with tab2:
             "보도자료 결과보고서 PDF 올리기 (이 앱에서 만든 결과보고서, 여러 개 가능) · 보도자료 제목·배포일과 게재 기사(다음·구글 포함)를 "
             "그대로 가져와 아래 ①·② 에 채웁니다. 결과보고서 뒤에 늦게 실린 같은 소식 기사도 보도자료로 셉니다.",
             type=["pdf"], accept_multiple_files=True, key=f"m_resrep_{st.session_state.get('m_cid', 0)}")
-        res_new = [f for f in (res_files or []) if f.file_id not in st.session_state.setdefault("m_res_applied", set())]
+        res_new = [f for f in (res_files or []) + st.session_state.pop("m_res_pending", [])
+                   if f.file_id not in st.session_state.setdefault("m_res_applied", set())]
         res_msg = st.session_state.pop("m_res_msg", None)
         if res_msg:
             getattr(st, res_msg[0])(res_msg[1])

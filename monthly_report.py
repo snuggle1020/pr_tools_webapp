@@ -277,6 +277,7 @@ def merge_result_reports(articles, releases, reports, year, month, keyword):
                      and len(bx & _bigrams(a["title"], keyword)) >= 0.6 * len(bx)), None)
 
     added = matched = 0
+    from_report = set()  # 결과보고서에 있는 기사 (id)
     for rep in reports:
         same = next((r for r in releases if r.get("date") and abs((r["date"] - rep["date"]).days) <= 1), None)
         if same:
@@ -293,16 +294,25 @@ def merge_result_reports(articles, releases, reports, year, month, keyword):
                 a.update(kind="보도자료", group="", include=True)
                 if not on_naver and not a.get("naver", True):
                     a["portal"] = other
+                from_report.add(id(a))
                 matched += 1
             else:
                 a = {"url": x["url"], "media": x["media"], "title": x["title"], "date": x["date"], "kind": "보도자료",
                      "include": True, "group": "", "naver": on_naver,
                      "portal": "네이버 검색제휴" if on_naver else other}
                 articles.append(a)
+                from_report.add(id(a))
                 if x["url"]:
                     by_url[normalize_url(x["url"])] = a
                 added += 1
     releases.sort(key=lambda r: r["date"] or date.max)
+    # 결과보고서가 있는 보도자료는 결과보고서가 기준: 자동 분류가 '보도자료'로 잡았지만 결과보고서에 없는 기사는
+    # 형식을 비우고(담당자가 기획·인터뷰 등으로 고름), 그중 같은 소식으로 늦게 실린 기사만 다시 보도자료로
+    dates = [r["date"] for r in releases]
+    rep_idx = {i for i, r in enumerate(releases) if any(r["date"] == rep["date"] for rep in reports)}
+    for a in articles:
+        if a["kind"] == "보도자료" and id(a) not in from_report and assign_release(a, dates) in rep_idx:
+            a["kind"] = ""
     late = auto_mark_releases(articles, releases, keyword)
     return added, matched, late
 
