@@ -1546,5 +1546,25 @@
     ]
    }
   }
+ },
+ "competitors": {
+  "딥파인": [
+   {
+    "name": "버넥트",
+    "category": "DAO"
+   },
+   {
+    "name": "비트맥스",
+    "category": "DAO,DSC"
+   },
+   {
+    "name": "리얼패킹",
+    "category": "LOGI.FINE"
+   },
+   {
+    "name": "테크타카",
+    "category": "LOGI.FINE"
+   }
+  ]
  }
 }
