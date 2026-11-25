@@ -897,6 +897,14 @@ with tab2:
         M["comp_names"] = comp_names
         names_now = [n.strip() for n in re.split(r"[,\n]", comp_names) if n.strip()]
         competitors = [c for c in (M.get("competitors") or []) if c["name"] in names_now]
+        if RECORDS is not None and "comp_cats" not in M:  # 예전에 모은 작업·작업 파일: 저장해 둔 분류를 한 번 불러옴
+            try:
+                M["comp_cats"] = {c["name"]: c.get("category", "") for c in RECORDS.competitors(M.get("keyword") or M["company"])}
+            except RecordsError:
+                M["comp_cats"] = {}
+        for c in competitors:  # 분류가 비어 있으면 저장해 둔 분류로
+            if not (c.get("category") or "").strip():
+                c["category"] = (M.get("comp_cats") or {}).get(c["name"], "")
         for c in competitors:
             with st.expander(f"{c['name']}" + (f" ({c['category']})" if c.get("category") else "") + f" · 기사 {len(c['articles'])}건"):
                 c["category"] = st.text_input("분류 (PDF 표 맨 왼쪽 칸, 예: DAO / DAO,DSC / LOGI.FINE)",
@@ -923,7 +931,9 @@ with tab2:
                 st.caption(f"배포 {cs['n_rel']}건 · 보도자료 {cs['rel_articles']} · 기획·인터뷰 {cs['plan']} · "
                            f"주가·시황 {cs['stock']} · 단순언급 {cs['mention']} · 총 {cs['total']}건")
         if RECORDS is not None and competitors:
-            now_comp = [(c["name"], (c.get("category") or "").strip()) for c in competitors]
+            # 빈 분류로 저장해 둔 분류를 지우지 않도록, 비어 있으면 저장된 값을 그대로 둠
+            now_comp = [(c["name"], (c.get("category") or "").strip() or (M.get("comp_cats") or {}).get(c["name"], ""))
+                        for c in competitors]
             if now_comp != M.get("comp_saved"):
                 try:
                     RECORDS.save_competitors(M.get("keyword") or M["company"], [{"name": n, "category": k} for n, k in now_comp])
