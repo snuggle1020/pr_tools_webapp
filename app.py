@@ -671,6 +671,15 @@ with tab2:
                     "auto_note": (n_rel, n_grp),
                     "competitors": [], "comp_names": (st.session_state.get("monthly") or {}).get("comp_names", ""),
                 }
+                if RECORDS is not None:  # 고객사별로 저장해 둔 경쟁사·분류가 있으면 그걸로
+                    try:
+                        saved = RECORDS.competitors(m_keyword)
+                        if saved:
+                            st.session_state["monthly"].update(comp_names=", ".join(c["name"] for c in saved),
+                                                               comp_cats={c["name"]: c.get("category", "") for c in saved},
+                                                               comp_saved=[(c["name"], c.get("category", "")) for c in saved])
+                    except RecordsError:
+                        pass
                 st.session_state["m_run"] = st.session_state.get("m_run", 0) + 1
                 st.session_state["m_cid"] = st.session_state.get("m_cid", 0) + 1
 
@@ -913,6 +922,15 @@ with tab2:
                 cs = competitor_summary(c["name"], c["articles"])
                 st.caption(f"배포 {cs['n_rel']}건 · 보도자료 {cs['rel_articles']} · 기획·인터뷰 {cs['plan']} · "
                            f"주가·시황 {cs['stock']} · 단순언급 {cs['mention']} · 총 {cs['total']}건")
+        if RECORDS is not None and competitors:
+            now_comp = [(c["name"], (c.get("category") or "").strip()) for c in competitors]
+            if now_comp != M.get("comp_saved"):
+                try:
+                    RECORDS.save_competitors(M.get("keyword") or M["company"], [{"name": n, "category": k} for n, k in now_comp])
+                    M["comp_saved"] = now_comp
+                    M["comp_cats"] = dict(now_comp)
+                except RecordsError as e:
+                    st.caption(f"경쟁사 목록을 앱에 저장하지 못했습니다 (이번 작업에는 그대로 쓰입니다): {e}")
         comp_err = st.session_state.pop("m_comp_err", None)
         if comp_err:
             st.warning("경쟁사 기사를 가져오지 못했습니다: " + " / ".join(comp_err))
@@ -985,7 +1003,8 @@ with tab2:
                     except Exception as e:
                         errs.append(f"{nm} ({e})")
                         continue
-                    old_cat = next((c.get("category", "") for c in (M.get("competitors") or []) if c["name"] == nm), "")
+                    old_cat = next((c.get("category", "") for c in (M.get("competitors") or []) if c["name"] == nm),
+                                   (M.get("comp_cats") or {}).get(nm, ""))
                     new_c.append({"name": nm, "category": old_cat, "articles": [
                         {"url": it.get("originallink") or it.get("link"), "media": it["_media"], "title": clean_html(it["title"]),
                          "date": it["_dt"].date(), "kind": ""} for it in items_c]})

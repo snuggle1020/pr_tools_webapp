@@ -160,6 +160,26 @@ class RecordsStore:
     # ---------------------------------------------------------------- 월별 기록 (연간 PR리포트용)
     # data["monthly"][고객사]["YYYY-MM"] = {"types": {형식: 건수}, "articles": [...], "releases": [...], "meetings": [[매체]]}
     # 저장소가 공개라 기자 미팅은 매체명만 남김 (기자 이름·메모는 저장하지 않음)
+    # ---------------------------------------------------------------- 경쟁사 목록·분류 (월간 리포트 경쟁사 비교)
+    def competitors(self, company):
+        """[{"name", "category"}] - 고객사별로 저장해 둔 경쟁사 (없으면 [])."""
+        data, _ = self._read_raw()
+        return list(data.get("competitors", {}).get(company, []))
+
+    def save_competitors(self, company, comps):
+        """comps: [{"name", "category"}] 로 통째로 바꿔 저장."""
+        self._ensure_branch()
+        for attempt in range(2):
+            data, sha = self._read_raw()
+            data.setdefault("competitors", {})[company] = [{"name": c["name"], "category": c.get("category", "")} for c in comps]
+            try:
+                self._write_raw(data, sha, f"{company} 경쟁사 저장: " + ", ".join(c["name"] for c in comps))
+                return
+            except RecordsError as e:
+                if attempt == 0 and "409" in str(e):
+                    continue
+                raise
+
     def monthly_companies(self):
         data, _ = self._read_raw()
         return sorted(data.get("monthly", {}))
